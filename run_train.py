@@ -63,7 +63,7 @@ def train_once(args, epoch, trainloader, model, optimizer):
             total_acc['dril'] += batch_accuracies['dril']
             total_acc['ez'] += batch_accuracies['ez']
             total_acc['rpe'] += batch_accuracies['rpe']
-    train_acc_epoch, train_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc.iteritems()}, total_loss / (batch + 1)
+    train_acc_epoch, train_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc.items()}, total_loss / (batch + 1)
     print('Epoch', str(epoch + 1), 'Train loss:', train_loss_epoch, "Train acc", train_acc_epoch)
 
 def valid_once(args, fold, epoch, testloader, model, optimizer):
@@ -94,7 +94,7 @@ def valid_once(args, fold, epoch, testloader, model, optimizer):
             total_acc_val['rpe'] += batch_accuracies['rpe']
 
         # Print accuracy
-        valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.iteritems()}, total_loss_val / (batch + 1)
+        valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
         print(f'K-FOLD CROSS VALIDATION RESULTS FOR {fold} FOLDS')
         print('Val loss:', valid_loss_epoch, "Val acc:", valid_acc_epoch)
 
