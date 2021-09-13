@@ -56,7 +56,7 @@ def train_once(args, epoch, trainloader, model, optimizer):
         labels = data["labels"]
         with torch.no_grad():
             outputs = model(image.to(args.device))
-            loss_train, losses_group = get_mutil_task_loss(outputs, labels)
+            loss_train, losses_group = get_mutil_task_loss(outputs, labels, args)
             total_loss += loss_train.cpu().item()
             batch_accuracies = calculate_metrics(outputs, labels)
             total_acc['edema'] += batch_accuracies['edema']
@@ -85,7 +85,7 @@ def valid_once(args, fold, epoch, testloader, model, optimizer):
             image = data["image"].repeat(1, 3, 1, 1)
             labels = data["labels"]
             outputs = model(image.to(args.device))
-            loss_val, losses_group = get_mutil_task_loss(outputs, labels)
+            loss_val, losses_group = get_mutil_task_loss(outputs, labels, args)
             total_loss_val += loss_val.cpu().item()
             batch_accuracies = calculate_metrics(outputs, labels)
             total_acc_val['edema'] += batch_accuracies['edema']
