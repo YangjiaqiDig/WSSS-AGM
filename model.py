@@ -5,8 +5,6 @@ import torch
 class MultiTaskModel(nn.Module):
     def __init__(self):
         super().__init__()
-        net = models.resnet18(pretrained=True)
-
         self.base_model = models.resnet18(pretrained=True)  # take the model without classifier
         num_ftrs = self.base_model.fc.out_features
         # the input for the classifier should be two-dimensional, but we will have
@@ -33,7 +31,8 @@ class MultiTaskModel(nn.Module):
 
     def forward(self, x):
         x = self.base_model(x)
-    
+        for param in self.base_model.parameters():
+            param.requires_grad = False
         return {
             'edema': self.edema(x),
             'dril': self.dril(x),

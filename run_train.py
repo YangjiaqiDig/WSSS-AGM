@@ -119,8 +119,6 @@ def train(args):
                         test_dataset,
                         batch_size=args.valid_batch_size, sampler=test_subsampler)
         model = MultiTaskModel()
-        for layer in model.base_model:
-            layer.trainable = False
         model = model.cuda() if args.device == "cuda" else model
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
         for epoch in range(0, args.n_epochs):
