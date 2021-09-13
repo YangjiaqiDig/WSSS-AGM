@@ -38,7 +38,6 @@ def configs():
     return args
 
 def train_once(args, epoch, trainloader, model, optimizer):
-    logging.info(f'Starting epoch {epoch+1}')
     model.train()
     for batch, data in enumerate(trainloader):
         image = data["image"].repeat(1, 3, 1, 1)
