@@ -94,7 +94,7 @@ def valid_once(args, fold, epoch, testloader, model, optimizer):
 
         # Print accuracy
         valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
-        print(f'K-FOLD CROSS VALIDATION RESULTS FOR {fold} FOLDS')
+        # print(f'K-FOLD CROSS VALIDATION RESULTS FOR {fold} FOLDS')
         print('Val loss:', valid_loss_epoch, "Val acc:", valid_acc_epoch)
 
 def train(args):
