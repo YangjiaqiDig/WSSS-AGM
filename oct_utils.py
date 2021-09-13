@@ -1,12 +1,12 @@
 import torch.nn as nn
 import torch
 
-def get_mutil_task_loss(net_output, ground_truth):
+def get_mutil_task_loss(net_output, ground_truth, args):
     loss_func = nn.CrossEntropyLoss()
-    emeda_loss = loss_func(net_output["edema"], ground_truth["edema"])
-    dril_loss = loss_func(net_output["dril"], ground_truth["dril"])
-    ez_loss = loss_func(net_output["ez"], ground_truth["ez"])
-    rpe_loss = loss_func(net_output["rpe"], ground_truth["rpe"])
+    emeda_loss = loss_func(net_output["edema"], ground_truth["edema"].to(args.device))
+    dril_loss = loss_func(net_output["dril"], ground_truth["dril"].to(args.device))
+    ez_loss = loss_func(net_output["ez"], ground_truth["ez"].to(args.device))
+    rpe_loss = loss_func(net_output["rpe"], ground_truth["rpe"].to(args.device))
     total_loss = emeda_loss + dril_loss + ez_loss + rpe_loss
     return total_loss, {"edema": emeda_loss, "dril": dril_loss, "ez": ez_loss, "rpe": rpe_loss}
 
