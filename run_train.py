@@ -32,7 +32,7 @@ def configs():
     parser.add_argument("--check_point", type=str, default="/model_epoch_350.pwf",
                         help="Path of the pre-trained CNN")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
-    parser.add_argument("--device_nr", type=str, default="0,1", help="Device Number")
+    parser.add_argument("--device_nr", type=str, default="3", help="Device Number")
     args = parser.parse_args()
 
     return args
