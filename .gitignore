@@ -1,4 +1,5 @@
 OCTID/
 train/
 train_label/
-
+dr_dataset/
+train_dr/

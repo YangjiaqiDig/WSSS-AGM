@@ -24,17 +24,49 @@ def get_dic_img_label(img, df, filename, dic):
 
     return dic
 
-df = pd.read_csv(LABELS_DIR)
-df = df[df['DRIL'].notna()]
-print("total number of labeled", len(df))
-labeled_file_name = df["Image"]
-for idx, filename in enumerate(labeled_file_name):
-    dic = {}
-    img_path = os.path.join(IMAGES_DIR, '{}.jpeg'.format(filename))
-    image = Image.open(img_path)
-    image_arr = np.asarray(image)
-    print(filename, image_arr.shape)
-    dic = get_dic_img_label(image_arr, df, filename, dic)
-    np.save("{0}/{1}.npy".format(IMAGES_LABELED_DIR, idx), dic)
-    shutil.copy(img_path, "{0}/{1}_{2}.jpeg".format(IMAGES_LABELED_DIR, idx, filename))
-    
+def get_dic_img_detail_lable(img, df, filename, dic):
+    # img,SRF,IRF,EZ attenuated,EZ disrupted,HRD,RPE,Retinal Traction,Definite DRIL,Questionable DRIL
+    dic["image"] = img
+    row = df.loc[df['img'] == filename]
+    dic["srf"] = row["SRF"].values[0]
+    dic["irf"] = row["IRF"].values[0]
+    dic["ezAtt"] = row["EZ attenuated"].values[0]
+    dic["ezDis"] = row["EZ disrupted"].values[0]
+    dic["hrd"] = row["HRD"].values[0]
+    dic["rpe"] = row["RPE"].values[0]
+    dic["rt"] = row["Retinal Traction"].values[0]
+    dic["dril"] = row["Definite DRIL"].values[0]
+    dic["qDril"] = row["Questionable DRIL"].values[0]
+    return dic
+
+def prepare_dme_dataset():
+    df = pd.read_csv(LABELS_DIR)
+    df = df[df['DRIL'].notna()]
+    print("total number of labeled", len(df))
+    labeled_file_name = df["Image"]
+    for idx, filename in enumerate(labeled_file_name):
+        dic = {}
+        img_path = os.path.join(IMAGES_DIR, '{}.jpeg'.format(filename))
+        image = Image.open(img_path)
+        image_arr = np.asarray(image)
+        print(filename, image_arr.shape)
+        dic = get_dic_img_label(image_arr, df, filename, dic)
+        np.save("{0}/{1}.npy".format(IMAGES_LABELED_DIR, idx), dic)
+        shutil.copy(img_path, "{0}/{1}_{2}.jpeg".format(IMAGES_LABELED_DIR, idx, filename))
+
+def prepare_dr_dataset():
+    df = pd.read_csv('dr_labels.csv')
+    print("total number of labeled", len(df))
+    labeled_file_name = df["img"]
+    for idx, filename in enumerate(labeled_file_name):
+        dic = {}
+        img_path = os.path.join('dr_dataset', '{}'.format(filename))
+        image = Image.open(img_path)
+        image_arr = np.asarray(image)
+        print(filename, image_arr.shape)
+        dic = get_dic_img_detail_lable(image_arr, df, filename, dic)
+        np.save("{0}/{1}.npy".format('train_dr', idx), dic)
+        shutil.copy(img_path, "{0}/{1}_{2}".format('train_dr', idx, filename))
+
+if __name__ == "__main__":
+    prepare_dr_dataset()
