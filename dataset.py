@@ -14,6 +14,23 @@ class OCTDataset(Dataset):
         img = dict_data["image"]
         if self.transform:
             img = self.transform(img)
+        if len(dict_data) == 10:
+            return {
+                'image': img,
+                'labels': {
+                    'edema': dict_data["srf"] or dict_data["irf"],
+                    'dril': dict_data["dril"],
+                    'ez': dict_data["ezAtt"] or dict_data["ezDis"],
+                    'rpe': dict_data["rpe"],
+                    'hrd': dict_data["hrd"],
+                    'rt': dict_data["rt"],
+                    'qDril': dict_data["qDril"],
+                    'srf': dict_data["srf"],
+                    'irf': dict_data["irf"],
+                    'ezAtt': dict_data["ezAtt"],
+                    'ezDis': dict_data["ezDis"]
+                }
+            }
         return {
             'image': img,
             'labels': {
@@ -49,6 +66,6 @@ def valid_transform():
 
 
 if __name__ == "__main__":
-    root_dir = "train_label"
+    root_dir = "train_dr"
     dataset = OCTDataset(root_dir, transform=train_transform())
     print(dataset[0])

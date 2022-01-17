@@ -4,4 +4,6 @@ train_label/
 dr_dataset/
 train_dr/
 results/
+results*/
 *.out
+__pycache__/
