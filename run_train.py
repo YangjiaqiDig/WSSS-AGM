@@ -11,10 +11,12 @@ from argparse import ArgumentParser
 from oct_utils import *
 import copy
 
+
 # logger = logging.getLogger(__file__).setLevel(logging.INFO)
 logging.basicConfig(level=logging.DEBUG)
 
 Class_Names = {'srf': 0, 'irf': 0, 'dril': 0, 'ezAtt': 0, 'ezDis': 0, 'rpe': 0, 'hrd': 0, 'rt': 0, 'qDril': 0}
+LABELS = ['srf', 'irf', 'ezAtt', 'ezDis', 'hrd', 'rpe', 'rt', 'dril']
 
 def configs():
     parser = ArgumentParser()
@@ -36,9 +38,27 @@ def configs():
                         help="Path of the pre-trained CNN")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
     parser.add_argument("--device_nr", type=str, default="3", help="Device Number")
+    parser.add_argument("--backbone", type=str, default="resnet18", help="resnet18, resnet50, resnet101, vgg16")
     args = parser.parse_args()
 
     return args
+
+def network_class(args):
+    if args.backbone == "resnet18":
+        print("Backbone: ResNet18")
+        backbone = models.resnet18(pretrained=True)
+    elif args.backbone == "vgg16":
+        print("Backbone: VGG16")
+        backbone = models.vgg16(pretrained=True)
+    elif args.backbone == "resnet50":
+        print("Backbone: ResNet50")
+        backbone = models.resnet50(pretrained=True)
+    elif args.backbone == "resnet101":
+        print("Backbone: ResNet101")
+        backbone = models.resnet101(pretrained=True)
+    else:
+        raise NotImplementedError("No backbone found for '{}'".format(args.backbone))   
+    return backbone
 
 def train_once(args, epoch, trainloader, model, optimizer):
     model.train()
@@ -144,7 +164,9 @@ def train(args):
         testloader = torch.utils.data.DataLoader(
                         test_dataset,
                         batch_size=args.valid_batch_size, sampler=test_subsampler)
-        model = MultiTaskModel()
+        backbone = network_class(args)
+        num_class = len(LABELS)
+        model = MultiTaskModel(backbone, num_class)
         model = model.cuda() if args.device == "cuda" else model
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
         for epoch in range(0, args.n_epochs):

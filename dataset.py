@@ -14,9 +14,10 @@ class OCTDataset(Dataset):
         data_pack = np.load(data_path, allow_pickle=True)
         dict_data = data_pack.item()
         img = dict_data["image"]
+        
         if self.transform:
             img = self.transform(img)
-        print(dict_data)
+        return [dict_data[x] for x in LABELS]
     def __len__(self):
         return len(self.file_list)
         
