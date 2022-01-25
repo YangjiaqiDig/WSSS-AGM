@@ -3,6 +3,8 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
+LABELS = ['srf', 'irf', 'ezAtt', 'ezDis', 'hrd', 'rpe', 'rt', 'dril']
+
 class OCTDataset(Dataset): 
     def __init__(self, root_dir, transform=None):
         self.file_list = glob.glob("%s/*.npy" % root_dir)
@@ -14,32 +16,7 @@ class OCTDataset(Dataset):
         img = dict_data["image"]
         if self.transform:
             img = self.transform(img)
-        if len(dict_data) == 10:
-            return {
-                'image': img,
-                'labels': {
-                    'edema': dict_data["srf"] or dict_data["irf"],
-                    'dril': dict_data["dril"],
-                    'ez': dict_data["ezAtt"] or dict_data["ezDis"],
-                    'rpe': dict_data["rpe"],
-                    'hrd': dict_data["hrd"],
-                    'rt': dict_data["rt"],
-                    'qDril': dict_data["qDril"],
-                    'srf': dict_data["srf"],
-                    'irf': dict_data["irf"],
-                    'ezAtt': dict_data["ezAtt"],
-                    'ezDis': dict_data["ezDis"]
-                }
-            }
-        return {
-            'image': img,
-            'labels': {
-                'edema': dict_data["edema"],
-                'dril': dict_data["dril"],
-                'ez': dict_data["ez"],
-                'rpe': dict_data["rpe"],
-            }
-        }
+        print(dict_data)
     def __len__(self):
         return len(self.file_list)
         
