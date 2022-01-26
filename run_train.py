@@ -1,3 +1,4 @@
+from random import shuffle
 import torch
 import os, time
 import torch.optim as optim
@@ -12,12 +13,12 @@ from oct_utils import *
 import copy
 import numpy as np
 from collections import Counter
+from tqdm import tqdm
 
 
 # logger = logging.getLogger(__file__).setLevel(logging.INFO)
 logging.basicConfig(level=logging.DEBUG)
-
-Class_Names = {'srf': 0, 'irf': 0, 'dril': 0, 'ezAtt': 0, 'ezDis': 0, 'rpe': 0, 'hrd': 0, 'rt': 0, 'qDril': 0}
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 def configs():
     parser = ArgumentParser()
@@ -61,11 +62,10 @@ def network_class(args):
         raise NotImplementedError("No backbone found for '{}'".format(args.backbone))   
     return backbone
 
-def train_once(args, epoch, trainloader, model, optimizer):
+def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
     loss_func = nn.BCELoss()#nn.BCEWithLogitsLoss()#
     model.train()
-
-    for batch, data in enumerate(trainloader):
+    for batch, data in tqdm(enumerate(trainloader), total = int(len(train_subsampler)/trainloader.batch_size)):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)
         optimizer.zero_grad()
         outputs = model(image)
@@ -86,8 +86,9 @@ def train_once(args, epoch, trainloader, model, optimizer):
             total_acc += Counter(batch_accuracies_metrics)
     train_acc_epoch, train_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc.items()}, total_loss / (batch + 1)
     print('Epoch', str(epoch + 1), 'Train loss:', train_loss_epoch, "Train acc", train_acc_epoch)
+    return train_loss_epoch
 
-def valid_once(args, fold, epoch, testloader, model, optimizer):
+def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler):
     save_path = f'./{args.save_folder}/fold-{fold}'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
@@ -103,7 +104,7 @@ def valid_once(args, fold, epoch, testloader, model, optimizer):
     total_acc_val = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
     total_loss_val = 0
     with torch.no_grad():
-        for batch, data in enumerate(testloader):
+        for batch, data in tqdm(enumerate(testloader), total=int(len(test_subsampler) / testloader.batch_size)):
             image, labels = data["image"].to(args.device), data["labels"].to(args.device)
             outputs = model(image)
             
@@ -116,10 +117,10 @@ def valid_once(args, fold, epoch, testloader, model, optimizer):
         valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
         # print(f'K-FOLD CROSS VALIDATION RESULTS FOR {fold} FOLDS')
         print('Val loss:', valid_loss_epoch, "Val acc:", valid_acc_epoch)
+        return valid_loss_epoch
 
 def train(args):
     if args.device == "cuda":
-        os.environ['CUDA_VISIBLE_DEVICES'] = args.device_nr
         print("GPU: ", torch.cuda.device_count())
     kfold = KFold(n_splits=args.k_folds, shuffle=True)
     dataset = OCTDataset(args.root_dir)
@@ -138,16 +139,17 @@ def train(args):
                         batch_size=args.train_batch_size, sampler=train_subsampler)
         testloader = torch.utils.data.DataLoader(
                         test_dataset,
-                        batch_size=args.valid_batch_size, sampler=test_subsampler)
+                        batch_size=args.valid_batch_size, sampler=test_subsampler, shuffle=False)
         backbone = network_class(args)
         num_class = len(LABELS)
         model = MultiTaskModel(backbone, num_class)
         model = model.cuda() if args.device == "cuda" else model
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
         for epoch in range(0, args.n_epochs):
-            train_once(args, epoch, trainloader, model, optimizer)
+            train_loss = train_once(args, epoch, trainloader, model, optimizer, train_subsampler)
             if (epoch + 1) % 5 == 0:
-                valid_once(args, fold, epoch, testloader, model, optimizer)
+                valid_loss = valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
+
     print('final running time:', time.time() - start)
 
 if __name__ == "__main__":
