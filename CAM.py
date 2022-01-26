@@ -1,6 +1,6 @@
 from operator import mod
 from model import MultiTaskModel
-from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
+from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, GuidedBackpropReLUModel
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from torchvision.models import resnet50
@@ -10,12 +10,17 @@ import glob
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-
+import torchvision.models as models
+from oct_utils import LABELS
+from dataset import OCTDataset, valid_transform
+from torchcam.methods import SmoothGradCAMpp
+import matplotlib.pyplot as plt
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '3'
-
+backbone = models.resnet18(pretrained=True)
+num_class = len(LABELS)
 device="cuda" if torch.cuda.is_available() else "cpu"
-model= MultiTaskModel().to(device)
+model= MultiTaskModel(backbone, num_class).to(device)
 
 # if device == "cuda":
 #     print("GPU: ", torch.cuda.device_count())
@@ -25,33 +30,36 @@ model= MultiTaskModel().to(device)
 checkpoint = torch.load('results_dr/fold-0/50.pwf')
 model.load_state_dict(checkpoint['state_dict'])
 
-# print(model)
-model.train()
+model.eval()
 target_layers = [model.base_model.layer4[-1]]
 
-cam = GradCAM(model=model, target_layers=target_layers, use_cuda=device)
-print(ClassifierOutputTarget)
+
+cam = GradCAM(model=model, use_cuda=device, target_layers=target_layers)
+cam_extractor = SmoothGradCAMpp(model)
+
 # targets = [ClassifierOutputTarget(281)]
 # print(targets)
-file_list = glob.glob("%s/*.npy" % 'train_dr')
-data_path = file_list[0]
-print(data_path)
-data_pack = np.load(data_path, allow_pickle=True)
-dict_data = data_pack.item()
-rgb_img = dict_data["image"]
+root_dir = "cam_test"
+dataset = OCTDataset(root_dir, transform=valid_transform())
+input_tensor = dataset[0]["image"]
+rgb_img = (np.float32(input_tensor.permute(1, 2, 0)))
+print(dataset[0]["labels"])
+plt.imshow(rgb_img); plt.axis('off'); plt.tight_layout(); plt.show()
+plt.savefig('origin.png')
 
-transform_seq = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize((500,500)),
-        transforms.ToTensor(),
-        # transforms.Normalize(mean=[0.485, 0.456, 0.406],
-        #                      std=[0.229, 0.224, 0.225])
-    ])
-input_tensor = transform_seq(rgb_img)
-input_tensor = torch.unsqueeze(input_tensor, axis=0).to(device)
-print(input_tensor.is_cuda )
+input_tensor = input_tensor.unsqueeze(0).to(device)
+output = model(input_tensor)
+print(output)
 
-    
-grayscale_cam = cam(input_tensor=input_tensor)
+# activation_map = cam_extractor(output.squeeze(0).argmax().item(), output)
+target = [ClassifierOutputTarget(1)]
+grayscale_cam = cam(input_tensor=input_tensor,targets=target,eigen_smooth=False, aug_smooth=False)
 grayscale_cam = grayscale_cam[0, :]
+# Visualize the raw CAM
+plt.imshow(grayscale_cam); plt.axis('off'); plt.tight_layout(); plt.show()
+plt.savefig('foo.png')
+# print(grayscale_cam, grayscale_cam.shape, rgb_img.shape)
+# sss
 visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
+plt.imshow(visualization); plt.axis('off'); plt.tight_layout(); plt.show()
+plt.savefig('foo2.png')

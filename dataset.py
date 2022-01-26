@@ -20,7 +20,7 @@ class OCTDataset(Dataset):
         
         if self.transform:
             img = self.transform(img)
-        return {'image': img, 'labels': torch.FloatTensor([dict_data[x] for x in LABELS])}
+        return {'image': img, 'labels': torch.FloatTensor([dict_data[x] for x in LABELS]), 'origin': dict_data["image"]}
     def __len__(self):
         return len(self.file_list)
         
