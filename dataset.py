@@ -1,9 +1,12 @@
 import glob
+
+from matplotlib import image
 import numpy as np
+from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-
-LABELS = ['srf', 'irf', 'ezAtt', 'ezDis', 'hrd', 'rpe', 'rt', 'dril']
+from oct_utils import LABELS
+import torch
 
 class OCTDataset(Dataset): 
     def __init__(self, root_dir, transform=None):
@@ -17,15 +20,15 @@ class OCTDataset(Dataset):
         
         if self.transform:
             img = self.transform(img)
-        return [dict_data[x] for x in LABELS]
+        return {'image': img, 'labels': torch.FloatTensor([dict_data[x] for x in LABELS])}
     def __len__(self):
         return len(self.file_list)
         
 def train_transform():
     transform_seq = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.Resize((500,500)),
-        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.Resize((500,750)),
+        # transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),
         # transforms.Normalize(mean=[0.485, 0.456, 0.406],
                             #  std=[0.229, 0.224, 0.225])
@@ -35,7 +38,7 @@ def train_transform():
 def valid_transform():
     transform_seq = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.Resize((500,500)),
+        transforms.Resize((500,750)),
         transforms.ToTensor(),
         # transforms.Normalize(mean=[0.485, 0.456, 0.406],
         #                      std=[0.229, 0.224, 0.225])
@@ -46,4 +49,6 @@ def valid_transform():
 if __name__ == "__main__":
     root_dir = "train_dr"
     dataset = OCTDataset(root_dir, transform=train_transform())
-    print(dataset[0])
+    for i in dataset:
+        print(i["image"].shape)
+        
