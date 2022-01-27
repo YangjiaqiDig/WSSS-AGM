@@ -41,9 +41,9 @@ cam_extractor = SmoothGradCAMpp(model)
 # print(targets)
 root_dir = "cam_test"
 dataset = OCTDataset(root_dir, transform=valid_transform())
-input_tensor = dataset[0]["image"]
+input_tensor = dataset[1]["image"]
 rgb_img = (np.float32(input_tensor.permute(1, 2, 0)))
-print(dataset[0]["labels"])
+print(dataset[1]["labels"])
 plt.imshow(rgb_img); plt.axis('off'); plt.tight_layout(); plt.show()
 
 input_tensor = input_tensor.unsqueeze(0).to(device)
@@ -51,7 +51,7 @@ output = model(input_tensor)
 print(output)
 # ['srf', 'irf', 'ezAtt', 'ezDis', 'hrd', 'rpe', 'rt', 'dril']
 # activation_map = cam_extractor(output.squeeze(0).argmax().item(), output)
-target = [ClassifierOutputTarget(6)]
+target = [ClassifierOutputTarget(7)]
 grayscale_cam = cam(input_tensor=input_tensor,targets=target,eigen_smooth=False, aug_smooth=True)
 grayscale_cam = grayscale_cam[0, :]
 # Visualize the raw CAM
@@ -61,4 +61,4 @@ plt.imshow(grayscale_cam); plt.axis('off'); plt.tight_layout(); plt.show()
 # sss
 visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
 plt.imshow(visualization); plt.axis('off'); plt.tight_layout(); plt.show()
-plt.savefig('cam_test/ts.png')
+plt.savefig('cam_test/9_dril.png')
