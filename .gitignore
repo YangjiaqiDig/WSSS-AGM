@@ -7,3 +7,4 @@ results/
 results*/
 *.out
 __pycache__/
+dataset_*/
