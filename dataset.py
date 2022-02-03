@@ -8,6 +8,8 @@ from torchvision import transforms
 from oct_utils import OrgLabels
 import torch
 import pandas as pd
+from sklearn.metrics import accuracy_score, f1_score
+
 # pd.set_option("display.max_rows", None)
 
 class OCTDataset(Dataset): 
@@ -61,8 +63,17 @@ def valid_transform():
 
 if __name__ == "__main__":
     root_dirs = ["dataset_DR", "dataset_DME/1", "dataset_DME/3"]
-    dataset = OCTDataset(root_dirs, transform=train_transform())
-    print(dataset[0])
-    # for i in dataset:
-    #     print(i["image"].shape)
+    dataset = OCTDataset(root_dirs, transform=valid_transform())
+    acc, f1m, f1mi = 0, 0, 0
+    gt = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    gt_dr = [0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+    for data in dataset:
+        if (data["path"].split('/')[0] == "dataset_DR" ): 
+            print('hey')
+            gt_f = gt_dr
+        else: gt_f = gt
+        acc +=  accuracy_score(gt_f,data["labels"].numpy())
+        f1m += f1_score(gt_f,data["labels"].numpy(),average = 'macro', zero_division=1)
+        f1mi += f1_score(gt_f,data["labels"].numpy(),average = 'micro', zero_division=1)
+    print(acc / len(dataset), f1m / len(dataset), f1mi / len(dataset))
         
