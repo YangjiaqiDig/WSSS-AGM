@@ -8,6 +8,7 @@ from torchvision import transforms
 from oct_utils import OrgLabels
 import torch
 import pandas as pd
+# pd.set_option("display.max_rows", None)
 
 class OCTDataset(Dataset): 
     def __init__(self, root_dirs, transform=None):
@@ -15,7 +16,7 @@ class OCTDataset(Dataset):
         for root_dir in root_dirs:
             self.file_list += glob.glob("%s/images/*" % root_dir)
             self.labels_table.append(pd.read_csv("%s/labels.csv" % root_dir)) 
-        self.labels_table = pd.concat(self.labels_table)
+        self.labels_table = pd.concat(self.labels_table, ignore_index=True)
         self.transform = transform
         self.roots = root_dirs
     def __getitem__(self, idx):
@@ -30,7 +31,9 @@ class OCTDataset(Dataset):
         if self.transform:
             image_tensor = self.transform(image_arr)
         else: image_tensor = t_func(image)
-        return {'image': image_tensor, 'labels': torch.FloatTensor([labels[x].to_numpy()[0] for x in OrgLabels]), 'path': data_path}
+        try:
+            return {'image': image_tensor, 'labels': torch.FloatTensor([labels[x].to_numpy()[0] for x in OrgLabels]), 'path': data_path}
+        except: print("???", data_path, image_tensor.shape, labels)
     def __len__(self):
         return len(self.file_list)
         
