@@ -22,8 +22,8 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 def configs():
     parser = ArgumentParser()
-    parser.add_argument("--root_dir", type=str, default="{0}".format("train_dr"),
-                        help="Hepatic, CREMI, ISBI12, ISBI13")
+    parser.add_argument("--root_dirs", type=str, default=["{0}", "{1}", "{2}"].format("dataset_DR", "dataset_DME/1", "dataset_DME/3"),
+                        help="list of directories")
     parser.add_argument("--k_folds", type=int,
                         default=5, help="k folds")
     parser.add_argument("--save_folder", type=str, default="results_dr",
@@ -123,7 +123,7 @@ def train(args):
     if args.device == "cuda":
         print("GPU: ", torch.cuda.device_count())
     kfold = KFold(n_splits=args.k_folds, shuffle=True)
-    dataset = OCTDataset(args.root_dir)
+    dataset = OCTDataset(args.root_dirs)
     start = time.time()
     # K-fold Cross Validation model evaluation
     for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
@@ -131,8 +131,8 @@ def train(args):
         # # Sample elements randomly from a given list of ids, no replacement.
         train_subsampler = torch.utils.data.SubsetRandomSampler(train_ids)
         test_subsampler = torch.utils.data.SubsetRandomSampler(test_ids)
-        train_dataset = OCTDataset(args.root_dir, transform=train_transform())
-        test_dataset = OCTDataset(args.root_dir, transform=valid_transform())
+        train_dataset = OCTDataset(args.root_dirs, transform=train_transform())
+        test_dataset = OCTDataset(args.root_dirs, transform=valid_transform())
         # Define data loaders for training and testing data in this fold
         trainloader = torch.utils.data.DataLoader(
                         train_dataset, 

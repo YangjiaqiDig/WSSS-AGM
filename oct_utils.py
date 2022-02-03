@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
 
 LABELS = ['srf', 'irf', 'ezAtt', 'ezDis', 'hrd', 'rpe', 'rt', 'dril']
+OrgLabels = ['SRF', 'IRF', 'EZ attenuated', 'EZ disrupted',  'HRD',  'RPE',  'Retinal Traction',  'Definite DRIL']
 
 def calculate_metrics(outputs, labels):
     predicted = np.round(outputs.cpu().detach().numpy())
