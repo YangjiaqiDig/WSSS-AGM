@@ -22,7 +22,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 def configs():
     parser = ArgumentParser()
-    parser.add_argument("--root_dirs", type=str, default=["{0}", "{1}", "{2}"].format("dataset_DR", "dataset_DME/1", "dataset_DME/3"),
+    parser.add_argument("--root_dirs", type=str, default=["dataset_DR", "dataset_DME/1", "dataset_DME/3"],
                         help="list of directories")
     parser.add_argument("--k_folds", type=int,
                         default=5, help="k folds")

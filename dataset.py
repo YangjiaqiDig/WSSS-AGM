@@ -14,7 +14,6 @@ class OCTDataset(Dataset):
         self.file_list, self.labels_table = [], []
         for root_dir in root_dirs:
             self.file_list += glob.glob("%s/images/*" % root_dir)
-            print("%s/labels.csv" % root_dir)
             self.labels_table.append(pd.read_csv("%s/labels.csv" % root_dir)) 
         self.labels_table = pd.concat(self.labels_table)
         self.transform = transform
@@ -22,12 +21,16 @@ class OCTDataset(Dataset):
     def __getitem__(self, idx):
         data_path = sorted(self.file_list)[idx]
         image = Image.open(data_path)
-        image_arr = np.asarray(image)  
+        image_arr = np.asarray(image) 
+        if (image_arr.ndim == 2):
+            image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
+        t_func = transforms.ToTensor()
         image_name = data_path.split('/')[-1]
         labels = self.labels_table.loc[self.labels_table['img'] == image_name]
         if self.transform:
-            image_arr = self.transform(image_arr)
-        return {'image': image_arr, 'labels': torch.FloatTensor([labels[x].to_numpy()[0] for x in OrgLabels]), 'origin': image}
+            image_tensor = self.transform(image_arr)
+        else: image_tensor = t_func(image)
+        return {'image': image_tensor, 'labels': torch.FloatTensor([labels[x].to_numpy()[0] for x in OrgLabels]), 'path': data_path}
     def __len__(self):
         return len(self.file_list)
         
