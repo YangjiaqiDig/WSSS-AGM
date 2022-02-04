@@ -9,7 +9,7 @@ from sklearn.model_selection import KFold
 from dataset import OCTDataset, train_transform, valid_transform
 import logging
 from argparse import ArgumentParser
-from oct_utils import *
+from oct_utils import OrgLabels, calculate_metrics
 import copy
 import numpy as np
 from collections import Counter
@@ -26,10 +26,10 @@ def configs():
                         help="list of directories")
     parser.add_argument("--k_folds", type=int,
                         default=5, help="k folds")
-    parser.add_argument("--save_folder", type=str, default="results_dr",
+    parser.add_argument("--save_folder", type=str, default="results_edema",
                         help="Path or url of the dataset")
     parser.add_argument("--train_batch_size", type=int,
-                        default=2, help="Batch size for training")
+                        default=8, help="Batch size for training")
     parser.add_argument("--valid_batch_size", type=int,
                         default=1, help="Batch size for validation")
     parser.add_argument("--lr", type=float,
@@ -141,7 +141,7 @@ def train(args):
                         test_dataset,
                         batch_size=args.valid_batch_size, sampler=test_subsampler, shuffle=False)
         backbone = network_class(args)
-        num_class = len(LABELS)
+        num_class = len(OrgLabels)
         model = MultiTaskModel(backbone, num_class)
         model = model.cuda() if args.device == "cuda" else model
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)

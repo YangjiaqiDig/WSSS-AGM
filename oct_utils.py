@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
 
 LABELS = ['srf', 'irf', 'ezAtt', 'ezDis', 'hrd', 'rpe', 'rt', 'dril']
-OrgLabels = ['SRF', 'IRF', 'EZ attenuated', 'EZ disrupted',  'HRD',  'RPE',  'Retinal Traction',  'Definite DRIL']
+OrgLabels = ['SRF', 'IRF','EZ attenuated', 'EZ disrupted',  'HRD',  'RPE',  'Retinal Traction',  'Definite DRIL']
 # 0.8247863247863247 0.7519246396739377 0.8247863247863247
 # 0.8301282051282052 0.7603308530659053 0.8301282051282052
 def calculate_metrics(outputs, labels):
