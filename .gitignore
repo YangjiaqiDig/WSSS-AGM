@@ -8,3 +8,4 @@ results*/
 *.out
 __pycache__/
 dataset_*/
+P_Net_Anomaly*/*
