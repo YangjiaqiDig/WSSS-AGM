@@ -9,3 +9,4 @@ results*/
 __pycache__/
 dataset_*/
 P_Net_Anomaly*/*
+logs/*

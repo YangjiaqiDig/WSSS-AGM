@@ -55,9 +55,11 @@ output = model(input_tensor)
 print(output)
 # ['srf', 'irf', 'ezAtt', 'ezDis', 'hrd', 'rpe', 'rt', 'dril']
 # activation_map = cam_extractor(output.squeeze(0).argmax().item(), output)
-targets = [ClassifierOutputTarget(1)]
+targets = [ClassifierOutputTarget(4)]
 grayscale_cam = cam(input_tensor=input_tensor,targets=targets,eigen_smooth=False, aug_smooth=True)
 grayscale_cam = grayscale_cam[0, :]
+grayscale_cam[grayscale_cam<0.8] =0 
+
 # Visualize the raw CAM
 plt.imshow(grayscale_cam); plt.axis('off'); plt.tight_layout(); plt.show()
 # print(grayscale_cam, grayscale_cam.shape, rgb_img.shape)
