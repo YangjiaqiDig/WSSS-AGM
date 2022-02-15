@@ -30,4 +30,4 @@ if __name__ == "__main__":
     # print(model)
     input_x = torch.rand(2, 3, 224, 224)
     output = model(input_x)
-    print(output)
+    print(output, output.shape)

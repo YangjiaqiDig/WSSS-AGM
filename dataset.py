@@ -43,7 +43,7 @@ def train_transform():
     transform_seq = transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize((500,750)),
-        # transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),
         # transforms.Normalize(mean=[0.485, 0.456, 0.406],
                             #  std=[0.229, 0.224, 0.225])
@@ -59,7 +59,15 @@ def valid_transform():
         #                      std=[0.229, 0.224, 0.225])
     ])
     return transform_seq
-
+def normal_transform():
+    transform_seq = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((500,750)),
+        transforms.ToTensor(),
+        # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+        #                      std=[0.229, 0.224, 0.225])
+    ])
+    return transform_seq
 
 if __name__ == "__main__":
     root_dirs = ["dataset_DR", "dataset_DME/1", "dataset_DME/3"]

@@ -1,3 +1,4 @@
+import imp
 from random import shuffle
 import torch
 import os, time
@@ -10,10 +11,10 @@ from dataset import OCTDataset, train_transform, valid_transform
 import logging
 from argparse import ArgumentParser
 from oct_utils import OrgLabels, calculate_metrics
-import copy
 import numpy as np
 from collections import Counter
 from tqdm import tqdm
+from CAM import save_cam_results
 
 
 # logger = logging.getLogger(__file__).setLevel(logging.INFO)
@@ -22,18 +23,19 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 def configs():
     parser = ArgumentParser()
-    parser.add_argument("--root_dirs", type=str, default=["dataset_DR", "dataset_DME/1", "dataset_DME/3"],
+    parser.add_argument("--root_dirs", type=str, default=["our_dataset/dataset_DR", "our_dataset/dataset_DME/1", "our_dataset/dataset_DME/3"],
                         help="list of directories")
     parser.add_argument("--k_folds", type=int,
                         default=5, help="k folds")
-    parser.add_argument("--save_folder", type=str, default="results_edema",
+    parser.add_argument("--save_folder", type=str, default="outputs/results_1",
                         help="Path or url of the dataset")
     parser.add_argument("--train_batch_size", type=int,
                         default=8, help="Batch size for training")
     parser.add_argument("--valid_batch_size", type=int,
                         default=1, help="Batch size for validation")
     parser.add_argument("--lr", type=float,
-                        default=0.001, help="Learning rate")
+                        default=0.0001, help="Learning rate")
+    parser.add_argument("--cam_type", type=str, default="gradcam", help="GradCAM")
     parser.add_argument("--n_epochs", type=int, default=50,
                         help="Number of training epochs")
     parser.add_argument("--check_point", type=str, default="/model_epoch_350.pwf",
@@ -112,6 +114,7 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
             total_loss_val += loss_val.cpu().item()
             batch_accuracies_metrics = calculate_metrics(outputs, labels)
             total_acc_val += Counter(batch_accuracies_metrics)
+            save_cam_results(args, epoch, model, data, outputs)
 
         # Print accuracy
         valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
@@ -122,8 +125,8 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
 def train(args):
     if args.device == "cuda":
         print("GPU: ", torch.cuda.device_count())
-    kfold = KFold(n_splits=args.k_folds, shuffle=True)
-    dataset = OCTDataset(args.root_dirs)
+    kfold = KFold(n_splits=args.k_folds, shuffle=False)
+    dataset = OCTDataset(args.root_dirs, transform=normal_transform)
     start = time.time()
     # K-fold Cross Validation model evaluation
     for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
@@ -131,14 +134,16 @@ def train(args):
         # # Sample elements randomly from a given list of ids, no replacement.
         train_subsampler = torch.utils.data.SubsetRandomSampler(train_ids)
         test_subsampler = torch.utils.data.SubsetRandomSampler(test_ids)
-        train_dataset = OCTDataset(args.root_dirs, transform=train_transform())
-        test_dataset = OCTDataset(args.root_dirs, transform=valid_transform())
+        # train_dataset = OCTDataset(args.root_dirs, transform=train_transform())
+        # test_dataset = OCTDataset(args.root_dirs, transform=valid_transform())
         # Define data loaders for training and testing data in this fold
         trainloader = torch.utils.data.DataLoader(
-                        train_dataset, 
+                        dataset, 
+                        num_workers=8,
                         batch_size=args.train_batch_size, sampler=train_subsampler)
         testloader = torch.utils.data.DataLoader(
-                        test_dataset,
+                        dataset,
+                        num_workers=8,
                         batch_size=args.valid_batch_size, sampler=test_subsampler, shuffle=False)
         backbone = network_class(args)
         num_class = len(OrgLabels)

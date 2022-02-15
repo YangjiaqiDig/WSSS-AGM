@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from medpy.filter.smoothing import anisotropic_diffusion
 import cv2 as cv
+import torchvision.utils as vutils
 
 def filter_noise():
     for filename in os.listdir('dataset_DR/images'):
@@ -33,5 +34,37 @@ def edge_detection():
     plt.savefig('tst3.jpeg')
     return
 
+def overlap():
+    """
+    visdom
+    """
+    image = Image.open('ganomaly/output/ganomaly/anomaly_dme_2/test/images/001_fake.png')
+    image_arr_f = np.array(image)
+    # edges = cv.Canny(image_arr_f,300,50)
+    # image_arr_f[image_arr_f < 85] = 0
+    # im = Image.fromarray(edges)
+    # im.save("your_file_f.jpeg")
+    
+    image_r = Image.open('ganomaly/output/ganomaly/anomaly_dme_2/test/images/001_real.png')
+    image_arr_r = np.array(image_r)
+    # edges = cv.Canny(image_arr_r,300,300)
+    # image_arr_r[image_arr_r < 85] = 0
+    # im = Image.fromarray(edges)
+    # im.save("your_file_r.jpeg")
+
+    
+    image_diff = np.abs(image_arr_f - image_arr_r)    
+    # image_diff[image_diff<127] = 0
+    
+    """
+    save images
+    """
+    # image_diff[image_diff<100] = 0
+    # image_diff[image_diff>=250] = 255
+    im = Image.fromarray(image_diff)
+    im.save("your_file.jpeg")
+    # image_residual = torch.abs(image_rec - image)
+
+
 if __name__ == "__main__":
-    edge_detection()
+    overlap()

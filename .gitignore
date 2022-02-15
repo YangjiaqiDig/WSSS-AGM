@@ -9,4 +9,8 @@ results*/
 __pycache__/
 dataset_*/
 P_Net_Anomaly*/*
+ganomaly/*
+anomalib/*
 logs/*
+oct_kaggle/*
+our_dataset/*
