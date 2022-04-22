@@ -13,14 +13,21 @@ from sklearn.metrics import accuracy_score, f1_score
 # pd.set_option("display.max_rows", None)
 
 class OCTDataset(Dataset): 
-    def __init__(self, root_dirs, transform=None):
+    def __init__(self, args, transform=None):
         self.file_list, self.labels_table = [], []
-        for root_dir in root_dirs:
-            self.file_list += glob.glob("%s/images/*" % root_dir)
+        for root_dir in args.root_dirs:
+            self.file_list += glob.glob("%s/images_backrm/*" % root_dir)
             self.labels_table.append(pd.read_csv("%s/labels.csv" % root_dir)) 
         self.labels_table = pd.concat(self.labels_table, ignore_index=True)
+        if args.combine_ez:
+            self.labels_table['EZ'] = self.labels_table['EZ attenuated'] + self.labels_table['EZ disrupted']
+            self.labels_table.loc[self.labels_table['EZ'] > 1, 'EZ'] = 1
+        if OrgLabels[-1] == 'BackGround':
+            self.labels_table['BackGround'] = 1
         self.transform = transform
-        self.roots = root_dirs
+        self.roots = args.root_dirs
+        self.input_gan = args.input_gan
+        self.input_structure = args.input_structure
     def __getitem__(self, idx):
         data_path = sorted(self.file_list)[idx]
         image = Image.open(data_path)
@@ -33,6 +40,15 @@ class OCTDataset(Dataset):
         if self.transform:
             image_tensor = self.transform(image_arr)
         else: image_tensor = t_func(image)
+        if self.input_gan:
+            gan_image = Image.open('our_dataset/ganomaly_results_backrm/1.abnormal/{}'.format(image_name))
+            gan_tensor = t_func(gan_image)
+            image_tensor = torch.cat((image_tensor, gan_tensor))
+        if self.input_structure:
+            str_image_gan = Image.open('our_dataset/structures/gan/{}'.format(image_name))
+            str_image_orig = Image.open('our_dataset/structures/original/{}'.format(image_name))
+            str_tensor_gan, str_tensor_orig = self.transform(np.asarray(str_image_gan)), self.transform(np.asarray(str_image_orig))
+            image_tensor = torch.cat((image_tensor, str_tensor_orig, str_tensor_gan))
         try:
             return {'image': image_tensor, 'labels': torch.FloatTensor([labels[x].to_numpy()[0] for x in OrgLabels]), 'path': data_path}
         except: print("???", data_path, image_tensor.shape, labels)
@@ -59,10 +75,11 @@ def valid_transform():
         #                      std=[0.229, 0.224, 0.225])
     ])
     return transform_seq
-def normal_transform():
+
+def normal_transform(is_size):
     transform_seq = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.Resize((500,750)),
+        transforms.Resize(is_size),
         transforms.ToTensor(),
         # transforms.Normalize(mean=[0.485, 0.456, 0.406],
         #                      std=[0.229, 0.224, 0.225])
@@ -70,7 +87,7 @@ def normal_transform():
     return transform_seq
 
 if __name__ == "__main__":
-    root_dirs = ["dataset_DR", "dataset_DME/1", "dataset_DME/3"]
+    root_dirs = ["our_dataset/dataset_DR", "our_dataset/dataset_DME/1", "our_dataset/dataset_DME/3"]
     dataset = OCTDataset(root_dirs, transform=valid_transform())
     acc, f1m, f1mi = 0, 0, 0
     gt = [0.0, 1.0, ]#0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

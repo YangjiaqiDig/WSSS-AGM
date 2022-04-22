@@ -11,6 +11,10 @@ dataset_*/
 P_Net_Anomaly*/*
 ganomaly/*
 anomalib/*
-logs/*
-oct_kaggle/*
-our_dataset/*
+logs/
+oct_kaggle/
+our_dataset/
+gan_and_str/
+gozde/
+outputs*/
+pretrained/
