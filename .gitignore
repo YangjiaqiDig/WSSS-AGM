@@ -18,3 +18,4 @@ gan_and_str/
 gozde/
 outputs*/
 pretrained/
+runs/*
