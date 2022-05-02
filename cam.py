@@ -33,7 +33,7 @@ def save_cam_during_train(params, cam):
     for i, pred in enumerate(batch_preds):
         rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
         img_path = inputs["path"][i].split('/')[-1]
-        save_path = os.path.join(args.save_folder, f'fold-{fold}', '{}'.format(img_path.split('.')[0]))
+        save_path = os.path.join(args.save_folder, f'fold-{fold}', 'iteration', '{}'.format(img_path.split('.')[0]))
         if not os.path.exists(save_path):
             os.makedirs(save_path)   
         # truth_label = '{0}_{1}'.format(inputs["labels"][i][0], inputs["labels"][i][1])

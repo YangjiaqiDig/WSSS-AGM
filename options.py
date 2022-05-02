@@ -26,7 +26,7 @@ class Configs():
                             help="list of directories")
         self.parser.add_argument("--k_folds", type=int,
                             default=10, help="k folds")
-        self.parser.add_argument("--save_folder", type=str, default="outputs/refinement_with_b",
+        self.parser.add_argument("--save_folder", type=str, default="outputs/results_back_class",
                             help="Path or url of the dataset")
         self.parser.add_argument("--train_batch_size", type=int,
                             default=8, help="Batch size for training")
@@ -41,6 +41,7 @@ class Configs():
                             help="The start epoch for refine input by cam")
         self.parser.add_argument("--check_point", type=str, default="/fold-0/25.pwf",
                             help="Path of the pre-trained Network")
+        self.parser.add_argument("--continue_train", type=bool, default=True, help="Continue train")
         self.parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
         self.parser.add_argument("--backbone", type=str, default="resnet18", help="resnet18, resnet50, resnet101, vgg16")
         self.parser.add_argument("--input_gan", type=bool, default=True, help="If involve GANs generation as input")
@@ -49,7 +50,7 @@ class Configs():
         self.parser.add_argument("--is_size", default=(256, 256), help="resize of input image, need same size as GANs generation") #(500,750)
         self.parser.add_argument("--inference", type=bool, default=False, help="Inference only")
         self.parser.add_argument("--save_inference", type=str, default='outputs_inference', help="Save inference or test images directory")
-        # self.parser.add_argument("--num_iteration", type=int, default=5, help="Number of iterations for refine CAM")
+        self.parser.add_argument("--num_iteration", type=int, default=5, help="Number of iterations for refine CAM")
 
     def parse(self):
         args = self.parser.parse_args()

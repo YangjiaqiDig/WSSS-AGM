@@ -13,19 +13,19 @@ import torchvision.models as models
 from sklearn.model_selection import KFold
 from tqdm import tqdm
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from torch.utils.tensorboard import SummaryWriter
 
 from cam import save_cam_results
 from dataset import (OCTDataset, normal_transform)
 from model import MultiClassModel, MultiTaskModel
 from oct_utils import OrgLabels, calculate_metrics
 from options import Configs
-import cv2
 import torchvision.utils as vutils
 
 
 # logger = logging.getLogger(__file__).setLevel(logging.INFO)
 logging.basicConfig(level=logging.DEBUG)
-DEVICE_NR = '0'
+DEVICE_NR = '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 
 def network_class(args):
@@ -45,30 +45,40 @@ def network_class(args):
         raise NotImplementedError("No backbone found for '{}'".format(args.backbone))   
     return backbone
 
-def refine_input_by_cam(model, image, cam):
+'''
+5 labels: image -> 2 / 5 (irf, ez)  -> class_prob > 0.5
+[0.1, 0.8, 0.1, 0.8, 1]
+cam * 5 -> prob (0-1)
+Muli(cam) -> 0
+Sum(cam5) -> 1
+filter cam5 -> cam2 -> Sum() -> normalize
+'''
+def refine_input_by_cam(model, image, cam, aug_smooth=False):
     outputs = model(image)
-    pred_classes = (outputs > 0.5) * 1 # [batch, cls]
+    bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
     batch_cam_masks = []
     for cls in range(len(OrgLabels)):
-        targets = [ClassifierOutputTarget(cls)]
-        grayscale_cam = np.array([cam(input_tensor=each_image.unsqueeze(0),targets=targets,eigen_smooth=False, aug_smooth=True) for each_image in image])
-        grayscale_cam = np.repeat(grayscale_cam, 3, 1)
-        grayscale_tensor = torch.from_numpy(grayscale_cam).to(args.device)
+        targets = [ClassifierOutputTarget(cls)] * len(image) # for all in batch return the current class cam
+        batch_grayscale_cam = cam(input_tensor=image,targets=targets,eigen_smooth=False, aug_smooth=aug_smooth)
+        grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
+        grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels
         batch_cam_masks.append(grayscale_tensor) # cls, [batch, 3, w, h]
-        
-    for idx_input in range(len(pred_classes)):
-        curr_cam_mask = [batch_cam_mask[idx_input] for batch_cam_mask in batch_cam_masks] # cls, [3, w, h]
-        curr_preds = pred_classes[idx_input] # cls
-        target_classes_cam = [class_cam * curr_preds[l] for l, class_cam in enumerate(curr_cam_mask[:-1])]
+    updated_input_tensor = image
+    for batch_idx in range(len(bacth_preds)):
+        singel_cam_masks = [batch_cam_mask[batch_idx] for batch_cam_mask in batch_cam_masks] # cls, [3, w, h]
+        curr_preds = bacth_preds[batch_idx] # (cls)
+        '''if predict 1, keep the class cam, else 0, turn cam to 0 black image. Except last class BackGround'''
+        target_classes_cam = [class_cam * curr_preds[l] for l, class_cam in enumerate(singel_cam_masks[:-1])]
+        # sum the cams for predicted classes
         sum_masks = sum(target_classes_cam)
+        # normalize the above 'attention map' to 0-1
         min, max = sum_masks.min(), sum_masks.max()
-        sum_masks.add_(-min).div_(max - min + 1e-5) # does norm -> multiply order matter?
-        background_mask = curr_cam_mask[-1]
-        
-        updated_input_tensor = image
-        updated_input_tensor[idx_input, :3,] = sum_masks * background_mask * image[idx_input, :3,]
-        return updated_input_tensor
-
+        sum_masks.add_(-min).div_(max - min + 1e-5) 
+        # BackGround CAM * normalized CAM * Original Image. does norm -> multiply order matter?
+        background_mask = singel_cam_masks[-1] # Background CAM
+        updated_input_tensor[batch_idx, :3,] = sum_masks * background_mask * image[batch_idx, :3,]
+    return updated_input_tensor
+    
 def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
     loss_func = nn.BCELoss()#nn.BCEWithLogitsLoss()#
     model.train()
@@ -76,9 +86,9 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
     cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
     for batch, data in tqdm(enumerate(trainloader), total = int(len(train_subsampler)/trainloader.batch_size)):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)
-        updated_image = image
-        if (epoch + 1) > args.refine_epoch_point:
-            updated_image = refine_input_by_cam(model, updated_image, cam)
+        updated_image = image.clone()
+        if (epoch + 1) > args.refine_epoch_point or args.continue_train:
+            updated_image = refine_input_by_cam(model, updated_image, cam, False)
         optimizer.zero_grad()
         outputs = model(updated_image)
         loss_train = loss_func(outputs, labels)
@@ -91,7 +101,7 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
     for batch, data in enumerate(trainloader):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)
         updated_image = image
-        if (epoch + 1) > args.refine_epoch_point:
+        if (epoch + 1) > args.refine_epoch_point or args.continue_train:
             updated_image = refine_input_by_cam(model, updated_image, cam)
         with torch.no_grad():
             outputs = model(updated_image)
@@ -101,7 +111,7 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
             total_acc += Counter(batch_accuracies_metrics)
     train_acc_epoch, train_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc.items()}, total_loss / (batch + 1)
     print('Epoch', str(epoch + 1), 'Train loss:', train_loss_epoch, "Train acc", train_acc_epoch)
-    return train_loss_epoch
+    return train_loss_epoch, train_acc_epoch
 
 def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler):
     save_path = f'./{args.save_folder}/fold-{fold}'
@@ -124,7 +134,7 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
     for batch, data in tqdm(enumerate(testloader), total=int(len(test_subsampler) / testloader.batch_size)):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)
         updated_image = image
-        if (epoch + 1) > args.refine_epoch_point:
+        if (epoch + 1) > args.refine_epoch_point or args.continue_train:
             updated_image = refine_input_by_cam(model, updated_image, cam)
         outputs = model(updated_image)
         # if (epoch + 1) % args.n_epochs == 0:
@@ -140,7 +150,7 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
     valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
     # print(f'K-FOLD CROSS VALIDATION RESULTS FOR {fold} FOLDS')
     print('Val loss:', valid_loss_epoch, "Val acc:", valid_acc_epoch)
-    return valid_loss_epoch
+    return valid_loss_epoch, valid_acc_epoch
 
 def train(args):
     if args.device == "cuda":
@@ -169,13 +179,22 @@ def train(args):
         num_class = len(OrgLabels)
         num_input_channel = dataset[0]['image'].shape[0]
         model = MultiTaskModel(backbone, num_class, num_input_channel)
+        if args.continue_train:
+            checkpoint = torch.load('{0}/fold-{1}/25.pwf'.format(args.save_folder, fold))   
+            print('Loading pretrained model from checkpoint {0}/fold-{1}/25.pwf'.format(args.save_folder, fold)) 
+            model.load_state_dict(checkpoint['state_dict'])
         model = model.cuda() if args.device == "cuda" else model
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
-        for epoch in range(0, args.n_epochs):
-            train_loss = train_once(args, epoch, trainloader, model, optimizer, train_subsampler)
-            if (epoch + 1) % 5 == 0:
-                valid_loss = valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
-
+        num_of_epochs = args.num_iteration if args.continue_train else args.n_epochs
+        for epoch in range(0, num_of_epochs):
+            train_loss, train_acc_matrix = train_once(args, epoch, trainloader, model, optimizer, train_subsampler)
+            if (epoch + 1) % 5 == 0 or args.continue_train:
+                valid_loss, valid_acc_matrxi = valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
+            tb.add_scalar("Train Loss", train_loss, epoch)
+            tb.add_scalar("Valid Loss", valid_loss, epoch)
+            tb.add_scalar("Train Accuracy", train_acc_matrix['acc'], epoch)
+            tb.add_scalar("Val Accuracy", valid_acc_matrxi['acc'], epoch)
+    tb.close()
     print('final running time:', time.time() - start)
 
 def train_multi_class(args):
@@ -284,6 +303,7 @@ def inference(args):
     return valid_loss_epoch
 
 if __name__ == "__main__":
+    tb = SummaryWriter()
     args = Configs().parse()
     # train_multi_class(args)
     if not args.inference:
