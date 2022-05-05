@@ -28,6 +28,7 @@ class OCTDataset(Dataset):
         self.roots = args.root_dirs
         self.input_gan = args.input_gan
         self.input_structure = args.input_structure
+        self.remove_background = args.remove_background
     def __getitem__(self, idx):
         data_path = sorted(self.file_list)[idx]
         image = Image.open(data_path)
@@ -41,10 +42,12 @@ class OCTDataset(Dataset):
             image_tensor = self.transform(image_arr)
         else: image_tensor = t_func(image)
         if self.input_gan:
-            gan_image = Image.open('our_dataset/ganomaly_results_backrm/1.abnormal/{}'.format(image_name))
+            gan_path = 'our_dataset/ganomaly_results_backrm/1.abnormal' if self.remove_background else 'our_dataset/ganomaly_results/1.abnormal'
+            gan_image = Image.open('{}/{}'.format(gan_path, image_name))
             gan_tensor = t_func(gan_image)
             image_tensor = torch.cat((image_tensor, gan_tensor))
         if self.input_structure:
+            # not re-generate structure for background removal
             str_image_gan = Image.open('our_dataset/structures/gan/{}'.format(image_name))
             str_image_orig = Image.open('our_dataset/structures/original/{}'.format(image_name))
             str_tensor_gan, str_tensor_orig = self.transform(np.asarray(str_image_gan)), self.transform(np.asarray(str_image_orig))

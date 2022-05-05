@@ -26,7 +26,8 @@ class Configs():
                             help="list of directories")
         self.parser.add_argument("--k_folds", type=int,
                             default=10, help="k folds")
-        self.parser.add_argument("--save_folder", type=str, default="outputs/results_back_class",
+        self.parser.add_argument("--remove_background", type=bool, default=False),
+        self.parser.add_argument("--save_folder", type=str, default="outputs/iterations_v2",
                             help="Path or url of the dataset")
         self.parser.add_argument("--train_batch_size", type=int,
                             default=8, help="Batch size for training")
@@ -37,11 +38,13 @@ class Configs():
         self.parser.add_argument("--cam_type", type=str, default="gradcam", help="GradCAM")
         self.parser.add_argument("--n_epochs", type=int, default=25, #25
                             help="Number of training epochs")
-        self.parser.add_argument("--refine_epoch_point", type=int, default=5, 
+        self.parser.add_argument("--refine_epoch_point", type=int, default=15, 
                             help="The start epoch for refine input by cam")
+        self.parser.add_argument("--n_refine_background", type=int, default=0, 
+                            help="Number of background only refinement")
         self.parser.add_argument("--check_point", type=str, default="/fold-0/25.pwf",
                             help="Path of the pre-trained Network")
-        self.parser.add_argument("--continue_train", type=bool, default=True, help="Continue train")
+        self.parser.add_argument("--continue_train", type=bool, default=False, help="Continue train")
         self.parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
         self.parser.add_argument("--backbone", type=str, default="resnet18", help="resnet18, resnet50, resnet101, vgg16")
         self.parser.add_argument("--input_gan", type=bool, default=True, help="If involve GANs generation as input")
