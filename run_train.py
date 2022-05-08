@@ -14,7 +14,7 @@ from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from torch.utils.tensorboard import SummaryWriter
 
 from cam import save_cam_results
-from dataset import (OCTDataset, normal_transform)
+from dataset import (OCTDataset, normal_transform, train_transform, valid_transform)
 from model import MultiTaskModel
 from oct_utils import OrgLabels, calculate_metrics
 from options import Configs
@@ -91,7 +91,7 @@ def refine_input_by_background_cam(model, image, cam, aug_smooth=True):
     grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
     grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels [batch, 3, w, h]
     
-    updated_input_tensor = image.clone() # [batch, 6, w, h]
+    updated_input_tensor = image.clone() # [batch, c, w, h]
     '''Apply background cam on original image'''
     # BackGround CAM * Original Image for predicted 1 background image only.
     for batch_idx, bg_pred in enumerate(bacth_bg_preds):
@@ -142,7 +142,7 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
     return train_loss_epoch, train_acc_epoch
 
 def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler):
-    save_path = f'./{args.save_folder}/fold-{fold}'
+    save_path = f'./{args.save_folder}/fold-{fold}/weights'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     torch.save({
@@ -168,7 +168,8 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
             else:
                 updated_image = refine_input_by_background_cam(model, updated_image, cam)
         outputs = model(updated_image)
-        if (epoch + 1) % args.n_epochs == 0 or args.continue_train or (epoch + 1) > args.refine_epoch_point:
+        # maybe only for args.n_epochs in first condition
+        if (epoch + 1) % 5 == 0 or args.continue_train or (epoch + 1) > args.refine_epoch_point: 
             params = {'args': args, 'epoch': epoch, 'model': model, 'fold': fold, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
             save_cam_results(params)
         with torch.no_grad():
@@ -186,8 +187,9 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
 def train(args):
     if args.device == "cuda":
         print("Number of GPUs: ", torch.cuda.device_count(), "Device Nbr: ", DEVICE_NR)
+    torch.manual_seed(42)
     kfold = KFold(n_splits=args.k_folds, shuffle=False)
-    dataset = OCTDataset(args, transform=normal_transform(args.is_size))
+    dataset = OCTDataset(args, transform_train=train_transform(args.is_size), transform_val=valid_transform(args.is_size))
     start = time.time()
     # K-fold Cross Validation model evaluation
     for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
@@ -195,8 +197,6 @@ def train(args):
         # # Sample elements randomly from a given list of ids, no replacement.
         train_subsampler = torch.utils.data.SubsetRandomSampler(train_ids)
         test_subsampler = torch.utils.data.SubsetRandomSampler(test_ids)
-        # train_dataset = OCTDataset(args.root_dirs, transform=train_transform())
-        # test_dataset = OCTDataset(args.root_dirs, transform=valid_transform())
         # Define data loaders for training and testing data in this fold
         trainloader = torch.utils.data.DataLoader(
                         dataset, 
@@ -211,8 +211,8 @@ def train(args):
         num_input_channel = dataset[0]['image'].shape[0]
         model = MultiTaskModel(backbone, num_class, num_input_channel)
         if args.continue_train:
-            checkpoint = torch.load('{0}/fold-{1}/25.pwf'.format(args.save_folder, fold))   
-            print('Loading pretrained model from checkpoint {0}/fold-{1}/25.pwf'.format(args.save_folder, fold)) 
+            checkpoint = torch.load('{0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold))   
+            print('Loading pretrained model from checkpoint {0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold)) 
             model.load_state_dict(checkpoint['state_dict'])
         model = model.cuda() if args.device == "cuda" else model
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
@@ -237,7 +237,7 @@ def inference(args):
     if args.device == "cuda":
         print("Number of GPUs: ", torch.cuda.device_count(), "Device Nbr: ", DEVICE_NR)
         
-    dataset = OCTDataset(args, transform=normal_transform(args.is_size))
+    dataset = OCTDataset(args, transform_train=train_transform(args.is_size), transform_val=valid_transform(args.is_size))
     testloader = torch.utils.data.DataLoader(
                     dataset,
                     num_workers=8,

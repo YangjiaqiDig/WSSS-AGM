@@ -14,6 +14,7 @@ type_color = {
     6: [255, 0, 255] # back ground pink
 }
 OrgLabels = ['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround'] # 'EZ attenuated', 'EZ disrupted', 'Retinal Traction',  'Definite DRIL']
+# OrgLabels = ['SRF', 'IRF', 'HRD', 'BackGround']
 # 0.8247863247863247 0.7519246396739377 0.8247863247863247
 # 0.8301282051282052 0.7603308530659053 0.8301282051282052
 def calculate_metrics(outputs, labels):

@@ -13,10 +13,12 @@ from sklearn.metrics import accuracy_score, f1_score
 # pd.set_option("display.max_rows", None)
 
 class OCTDataset(Dataset): 
-    def __init__(self, args, transform=None):
+    def __init__(self, args, transform_train=None, transform_val=None):
         self.file_list, self.labels_table = [], []
+        self.remove_background = args.remove_background
         for root_dir in args.root_dirs:
-            self.file_list += glob.glob("%s/images_backrm/*" % root_dir)
+            imgs_path = 'images_backrm' if self.remove_background else 'images'
+            self.file_list += glob.glob("{}/{}/*".format(root_dir, imgs_path))
             self.labels_table.append(pd.read_csv("%s/labels.csv" % root_dir)) 
         self.labels_table = pd.concat(self.labels_table, ignore_index=True)
         if args.combine_ez:
@@ -24,11 +26,13 @@ class OCTDataset(Dataset):
             self.labels_table.loc[self.labels_table['EZ'] > 1, 'EZ'] = 1
         if OrgLabels[-1] == 'BackGround':
             self.labels_table['BackGround'] = 1
-        self.transform = transform
+        self.transform_train = transform_train
+        self.transform_val = transform_val
         self.roots = args.root_dirs
         self.input_gan = args.input_gan
         self.input_structure = args.input_structure
-        self.remove_background = args.remove_background
+    def set_use_train_transform(self):
+        return
     def __getitem__(self, idx):
         data_path = sorted(self.file_list)[idx]
         image = Image.open(data_path)
@@ -38,7 +42,7 @@ class OCTDataset(Dataset):
         t_func = transforms.ToTensor()
         image_name = data_path.split('/')[-1]
         labels = self.labels_table.loc[self.labels_table['img'] == image_name]
-        if self.transform:
+        if self.transform_train:
             image_tensor = self.transform(image_arr)
         else: image_tensor = t_func(image)
         if self.input_gan:
@@ -58,21 +62,22 @@ class OCTDataset(Dataset):
     def __len__(self):
         return len(self.file_list)
         
-def train_transform():
+def train_transform(is_size):
     transform_seq = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.Resize((500,750)),
+        transforms.Resize(is_size),
         transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomRotation(degrees=15),
         transforms.ToTensor(),
         # transforms.Normalize(mean=[0.485, 0.456, 0.406],
                             #  std=[0.229, 0.224, 0.225])
     ])
     return transform_seq
 
-def valid_transform():
+def valid_transform(is_size):
     transform_seq = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.Resize((500,750)),
+        transforms.Resize(is_size),
         transforms.ToTensor(),
         # transforms.Normalize(mean=[0.485, 0.456, 0.406],
         #                      std=[0.229, 0.224, 0.225])
