@@ -157,7 +157,7 @@ def save_cam_for_inference(params, cam):
                 import pdb; pdb.set_trace()
         import pdb; pdb.set_trace()
                
-def save_cam_results(params):
+def save_cam_results(params, is_inference=False):
     args = params['args']
     model = params['model']
     # batch_preds [BC] B: batch, C: Class
@@ -167,9 +167,10 @@ def save_cam_results(params):
     else: 
         target_layers = [model.base_model.layer4[-1]]
         cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
-    if not args.inference:
-        save_cam_during_train(params, cam)
-    else: save_cam_for_inference(params, cam)
+    if is_inference:
+        save_cam_for_inference(params, cam)
+        return
+    save_cam_during_train(params, cam)
     
 if __name__ == "__main__":
     backbone = models.resnet18(pretrained=True)

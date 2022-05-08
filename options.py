@@ -53,7 +53,6 @@ class Configs():
         self.parser.add_argument("--input_structure", type=bool, default=False, help="If involve Struture as input")
         self.parser.add_argument("--combine_ez", type=bool, default=True, help="If combine ez two conditions")
         self.parser.add_argument("--is_size", default=(256, 256), help="resize of input image, need same size as GANs generation") #(500,750)
-        self.parser.add_argument("--inference", type=bool, default=False, help="Inference only")
         self.parser.add_argument("--save_inference", type=str, default='outputs_inference', help="Save inference or test images directory")
         self.parser.add_argument("--num_iteration", type=int, default=10, help="Number of iterations for refine CAM")
 
