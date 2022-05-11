@@ -1,14 +1,14 @@
 import glob
-
-from matplotlib import image
 import numpy as np
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from torchvision import transforms
 from oct_utils import OrgLabels
 import torch
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
+from gan_inference import load_gan_model
+import torchvision.utils as vutils
 
 # pd.set_option("display.max_rows", None)
 
@@ -28,33 +28,41 @@ class OCTDataset(Dataset):
             self.labels_table['BackGround'] = 1
         self.transform_train = transform_train
         self.transform_val = transform_val
+        self.transform_norml = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         self.roots = args.root_dirs
         self.input_gan = args.input_gan
         self.input_structure = args.input_structure
-    def set_use_train_transform(self):
-        return
+        self.use_train = False
+        if self.input_gan:
+            with torch.no_grad():
+                path = "{}/netG.pth".format(args.model_gan)
+                self.gan_pretrained_dict = torch.load(path, map_location='cpu')['state_dict']
+                self.gan_pretrained = load_gan_model(self.gan_pretrained_dict)
+                print(f' Loaded Pretained GAN weights from {path}.')
+    def set_use_train_transform(self, use_train=False):
+        self.use_train = use_train
     def __getitem__(self, idx):
         data_path = sorted(self.file_list)[idx]
         image = Image.open(data_path)
         image_arr = np.asarray(image) 
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
-        t_func = transforms.ToTensor()
         image_name = data_path.split('/')[-1]
         labels = self.labels_table.loc[self.labels_table['img'] == image_name]
-        if self.transform_train:
-            image_tensor = self.transform(image_arr)
-        else: image_tensor = t_func(image)
+        if self.use_train:
+            image_tensor = self.transform_train(image_arr)
+        else: image_tensor = self.transform_val(image_arr)
         if self.input_gan:
-            gan_path = 'our_dataset/ganomaly_results_backrm/1.abnormal' if self.remove_background else 'our_dataset/ganomaly_results/1.abnormal'
-            gan_image = Image.open('{}/{}'.format(gan_path, image_name))
-            gan_tensor = t_func(gan_image)
+            input_for_gan = self.transform_norml(image_tensor)
+            gan_tensor = self.gan_pretrained.inference(input_for_gan)
             image_tensor = torch.cat((image_tensor, gan_tensor))
+            # import random
+            # vutils.save_image(image_tensor.reshape(-1,3,256, 256), 'test{}.png'.format(random.randint(1,20)), normalize=True, scale_each=True)
         if self.input_structure:
             # not re-generate structure for background removal
             str_image_gan = Image.open('our_dataset/structures/gan/{}'.format(image_name))
             str_image_orig = Image.open('our_dataset/structures/original/{}'.format(image_name))
-            str_tensor_gan, str_tensor_orig = self.transform(np.asarray(str_image_gan)), self.transform(np.asarray(str_image_orig))
+            str_tensor_gan, str_tensor_orig = self.transform_val(np.asarray(str_image_gan)), self.transform_val(np.asarray(str_image_orig))
             image_tensor = torch.cat((image_tensor, str_tensor_orig, str_tensor_gan))
         try:
             return {'image': image_tensor, 'labels': torch.FloatTensor([labels[x].to_numpy()[0] for x in OrgLabels]), 'path': data_path}
@@ -67,7 +75,7 @@ def train_transform(is_size):
         transforms.ToPILImage(),
         transforms.Resize(is_size),
         transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=15),
+        transforms.RandomRotation(degrees=(15)),
         transforms.ToTensor(),
         # transforms.Normalize(mean=[0.485, 0.456, 0.406],
                             #  std=[0.229, 0.224, 0.225])

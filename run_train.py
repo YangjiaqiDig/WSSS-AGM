@@ -14,7 +14,7 @@ from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from torch.utils.tensorboard import SummaryWriter
 
 from cam import save_cam_results
-from dataset import (OCTDataset, normal_transform, train_transform, valid_transform)
+from dataset import (OCTDataset, train_transform, valid_transform)
 from model import MultiTaskModel
 from oct_utils import OrgLabels, calculate_metrics
 from options import Configs
@@ -105,6 +105,7 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
     model.train()
     target_layers = [model.base_model.layer4[-1]]
     cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
+    trainloader.dataset.set_use_train_transform(True)
     for batch, data in tqdm(enumerate(trainloader), total = int(len(train_subsampler)/trainloader.batch_size)):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)
         updated_image = image.clone()
@@ -158,6 +159,7 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
     # 
     target_layers = [model.base_model.layer4[-1]]
     cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
+    testloader.dataset.set_use_train_transform(False)
     for batch, data in tqdm(enumerate(testloader), total=int(len(test_subsampler) / testloader.batch_size)):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)
         updated_image = image
