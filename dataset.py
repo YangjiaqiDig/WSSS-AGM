@@ -7,7 +7,6 @@ from oct_utils import OrgLabels
 import torch
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
-from gan_inference import load_gan_model
 import torchvision.utils as vutils
 
 # pd.set_option("display.max_rows", None)
@@ -28,17 +27,9 @@ class OCTDataset(Dataset):
             self.labels_table['BackGround'] = 1
         self.transform_train = transform_train
         self.transform_val = transform_val
-        self.transform_norml = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         self.roots = args.root_dirs
-        self.input_gan = args.input_gan
         self.input_structure = args.input_structure
         self.use_train = False
-        if self.input_gan:
-            with torch.no_grad():
-                path = "{}/netG.pth".format(args.model_gan)
-                self.gan_pretrained_dict = torch.load(path, map_location='cpu')['state_dict']
-                self.gan_pretrained = load_gan_model(self.gan_pretrained_dict)
-                print(f' Loaded Pretained GAN weights from {path}.')
     def set_use_train_transform(self, use_train=False):
         self.use_train = use_train
     def __getitem__(self, idx):
@@ -52,12 +43,6 @@ class OCTDataset(Dataset):
         if self.use_train:
             image_tensor = self.transform_train(image_arr)
         else: image_tensor = self.transform_val(image_arr)
-        if self.input_gan:
-            input_for_gan = self.transform_norml(image_tensor)
-            gan_tensor = self.gan_pretrained.inference(input_for_gan)
-            image_tensor = torch.cat((image_tensor, gan_tensor))
-            # import random
-            # vutils.save_image(image_tensor.reshape(-1,3,256, 256), 'test{}.png'.format(random.randint(1,20)), normalize=True, scale_each=True)
         if self.input_structure:
             # not re-generate structure for background removal
             str_image_gan = Image.open('our_dataset/structures/gan/{}'.format(image_name))

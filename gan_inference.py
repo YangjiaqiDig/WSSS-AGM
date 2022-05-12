@@ -15,7 +15,7 @@ from gan_and_str.ganomaly.options import Options
 from gan_model import Ganomaly
 
 ##
-def load_gan_model(pretrained_dict):
+def load_gan_model(pretrained_dict, device):
     ##
     # ARGUMENTS
     opt = Options().inference_parse()
@@ -23,7 +23,7 @@ def load_gan_model(pretrained_dict):
     opt.batchsize = 1
     opt.ngpu = 0
     # Evaluation metric. auprc | roc | f1_score
-    model = Ganomaly(opt, pretrained_dict)
+    model = Ganomaly(opt, pretrained_dict, device)
     return model
 
 if __name__ == '__main__':

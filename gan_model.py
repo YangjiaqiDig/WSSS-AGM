@@ -19,7 +19,6 @@ class BaseModel():
 
         # Initalize variables.
         self.opt = opt
-        self.device = torch.device("cpu")
 
     ##
     def seed(self, seed_value):
@@ -42,17 +41,18 @@ class BaseModel():
         
     def inference(self, image_tensor):
         with torch.no_grad():        
-            self.input.resize_(image_tensor.unsqueeze(0).size()).copy_(image_tensor.unsqueeze(0))
+            self.input.resize_(image_tensor.size()).copy_(image_tensor)
             self.fake, latent_i, latent_o = self.netg(self.input)
-            return self.fake.data.squeeze(0)
+            return self.fake.data
 
             
 ##
 class Ganomaly(BaseModel):
-    def __init__(self, opt, pretrained_dict):
+    def __init__(self, opt, pretrained_dict, device):
         super(Ganomaly, self).__init__(opt)
 
         ##
+        self.device = torch.device(device)
         # Create and initialize networks.
         self.netg = NetG(self.opt).to(self.device)
         self.netd = NetD(self.opt).to(self.device)

@@ -12,17 +12,19 @@ from sklearn.model_selection import KFold
 from tqdm import tqdm
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from torch.utils.tensorboard import SummaryWriter
+import torchvision.utils as vutils
 
+from gan_inference import load_gan_model
 from cam import save_cam_results
 from dataset import (OCTDataset, train_transform, valid_transform)
 from model import MultiTaskModel
 from oct_utils import OrgLabels, calculate_metrics
 from options import Configs
-
+from torchvision import transforms
 
 # logger = logging.getLogger(__file__).setLevel(logging.INFO)
 logging.basicConfig(level=logging.DEBUG)
-DEVICE_NR = '3'
+DEVICE_NR = '0'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 
 def network_class(args):
@@ -100,7 +102,8 @@ def refine_input_by_background_cam(model, image, cam, aug_smooth=True):
         updated_input_tensor[batch_idx, :3,] = soft_apply
     return updated_input_tensor
 
-def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
+transform_norml = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+def train_once(args, epoch, trainloader, model, optimizer, train_subsampler, gan_pretrained):
     loss_func = nn.BCELoss()#nn.BCEWithLogitsLoss()#
     model.train()
     target_layers = [model.base_model.layer4[-1]]
@@ -114,6 +117,11 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
                 updated_image = refine_input_by_cam(model, updated_image, cam)
             else:
                 updated_image = refine_input_by_background_cam(model, updated_image, cam)
+        if args.input_gan:
+            input_for_gan = transform_norml(updated_image)
+            gan_tensor = gan_pretrained.inference(input_for_gan)
+            updated_image = torch.cat((image, gan_tensor), dim=1)
+
         optimizer.zero_grad()
         outputs = model(updated_image)
         loss_train = loss_func(outputs, labels)
@@ -131,6 +139,10 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
                 updated_image = refine_input_by_cam(model, updated_image, cam)
             else:
                 updated_image = refine_input_by_background_cam(model, updated_image, cam)
+        if args.input_gan:
+            input_for_gan = transform_norml(updated_image)
+            gan_tensor = gan_pretrained.inference(input_for_gan)
+            updated_image = torch.cat((image, gan_tensor), dim=1)
         with torch.no_grad():
             outputs = model(updated_image)
             loss_train = loss_func(outputs, labels)
@@ -141,7 +153,7 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler):
     print('Epoch', str(epoch + 1), 'Train loss:', train_loss_epoch, "Train acc", train_acc_epoch)
     return train_loss_epoch, train_acc_epoch
 
-def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler):
+def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler, gan_pretrained):
     save_path = f'./{args.save_folder}/fold-{fold}/weights'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
@@ -168,6 +180,10 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
                 updated_image = refine_input_by_cam(model, updated_image, cam)
             else:
                 updated_image = refine_input_by_background_cam(model, updated_image, cam)
+        if args.input_gan:
+            input_for_gan = transform_norml(updated_image)
+            gan_tensor = gan_pretrained.inference(input_for_gan)
+            updated_image = torch.cat((image, gan_tensor), dim=1)
         outputs = model(updated_image)
         # maybe only for args.n_epochs in first condition
         if (epoch + 1) % 5 == 0 or args.continue_train or (epoch + 1) > args.refine_epoch_point: 
@@ -191,6 +207,25 @@ def train(args):
     torch.manual_seed(42)
     kfold = KFold(n_splits=args.k_folds, shuffle=False)
     dataset = OCTDataset(args, transform_train=train_transform(args.is_size), transform_val=valid_transform(args.is_size))
+    
+    backbone = network_class(args)
+    num_class = len(OrgLabels)
+    num_input_channel = dataset[0]['image'].shape[0]
+    model = MultiTaskModel(backbone, num_class, num_input_channel)
+    if args.continue_train:
+        checkpoint = torch.load('{0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold))   
+        print('Loading pretrained model from checkpoint {0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold)) 
+        model.load_state_dict(checkpoint['state_dict'])
+    model = model.cuda() if args.device == "cuda" else model
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+    num_of_epochs = args.num_iteration if args.continue_train else args.n_epochs
+    if args.input_gan:
+        with torch.no_grad():
+            path = "{}/netG.pth".format(args.model_gan)
+            gan_pretrained_dict = torch.load(path)['state_dict'] #, map_location='cpu'
+            gan_pretrained = load_gan_model(gan_pretrained_dict, args.device)
+            print(f' Loaded Pretained GAN weights from {path}.')
+            
     start = time.time()
     # K-fold Cross Validation model evaluation
     for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
@@ -207,21 +242,10 @@ def train(args):
                         dataset,
                         num_workers=8,
                         batch_size=args.valid_batch_size, sampler=test_subsampler, shuffle=False)
-        backbone = network_class(args)
-        num_class = len(OrgLabels)
-        num_input_channel = dataset[0]['image'].shape[0]
-        model = MultiTaskModel(backbone, num_class, num_input_channel)
-        if args.continue_train:
-            checkpoint = torch.load('{0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold))   
-            print('Loading pretrained model from checkpoint {0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold)) 
-            model.load_state_dict(checkpoint['state_dict'])
-        model = model.cuda() if args.device == "cuda" else model
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
-        num_of_epochs = args.num_iteration if args.continue_train else args.n_epochs
         for epoch in range(0, num_of_epochs):
-            train_loss, train_acc_matrix = train_once(args, epoch, trainloader, model, optimizer, train_subsampler)
+            train_loss, train_acc_matrix = train_once(args, epoch, trainloader, model, optimizer, train_subsampler, gan_pretrained)
             if (epoch + 1) % 5 == 0 or args.continue_train or (epoch + 1) > args.refine_epoch_point:
-                valid_loss, valid_acc_matrxi = valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler)
+                valid_loss, valid_acc_matrxi = valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler, gan_pretrained)
                 tb.add_scalars('Loss/Train', {'fold{}'.format(fold): train_loss}, epoch+1)
                 tb.add_scalars('Loss/Valid', {'fold{}'.format(fold): valid_loss}, epoch+1)
                 for acc_type in ['acc', 'f1m']:
