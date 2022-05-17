@@ -7,7 +7,6 @@ Returns:
 """
 
 import argparse
-from ast import arg
 import torch
 import os
 
@@ -20,15 +19,10 @@ class Configs():
 
     def __init__(self):
         self.parser = argparse.ArgumentParser()
-        self.parser.add_argument("--root_dirs", type=str, default=["our_dataset/dataset_DR",
-                                                            "our_dataset/dataset_DME/1", 
-                                                            "our_dataset/dataset_DME/2",
-                                                            "our_dataset/dataset_DME/3",
-                                                            "our_dataset/dataset_DME/4"],
-                            help="list of directories")
+        self.parser.add_argument("--root_dirs", type=str, default="our_dataset/original",
+                            help="root datasets directory")
         self.parser.add_argument("--k_folds", type=int,
                             default=10, help="k folds")
-        self.parser.add_argument("--remove_background", type=bool, default=False),
         self.parser.add_argument("--save_folder", type=str, default="outputs/naive_aug_gan",
                             help="Path or url of the dataset")
         self.parser.add_argument("--train_batch_size", type=int,

@@ -31,6 +31,8 @@ def calculate_metrics(outputs, labels):
     res_dic = {'acc': acc / len(outputs), 'f1m': f1m / len(outputs), 'f1mi': f1mi / len(outputs)}
     for i in range(len(OrgLabels)):
         res_dic[OrgLabels[i]] = class_acc[i]
+        
+    # TODO: roc
     return res_dic
 
 if __name__ == "__main__":

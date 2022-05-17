@@ -7,19 +7,16 @@ from oct_utils import OrgLabels
 import torch
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
-import torchvision.utils as vutils
-
+import os
 # pd.set_option("display.max_rows", None)
 
 class OCTDataset(Dataset): 
     def __init__(self, args, transform_train=None, transform_val=None):
-        self.file_list, self.labels_table = [], []
-        self.remove_background = args.remove_background
-        for root_dir in args.root_dirs:
-            imgs_path = 'images_backrm' if self.remove_background else 'images'
-            self.file_list += glob.glob("{}/{}/*".format(root_dir, imgs_path))
-            self.labels_table.append(pd.read_csv("%s/labels.csv" % root_dir)) 
-        self.labels_table = pd.concat(self.labels_table, ignore_index=True)
+        self.file_list = []
+        subfolders = os.listdir(args.root_dirs)
+        for sub_dir in subfolders:
+            self.file_list += glob.glob("{}/{}/*".format(args.root_dirs, sub_dir))
+        self.labels_table = pd.read_csv("our_dataset/labels.csv")
         if args.combine_ez:
             self.labels_table['EZ'] = self.labels_table['EZ attenuated'] + self.labels_table['EZ disrupted']
             self.labels_table.loc[self.labels_table['EZ'] > 1, 'EZ'] = 1
@@ -88,7 +85,14 @@ def normal_transform(is_size):
     return transform_seq
 
 if __name__ == "__main__":
-    root_dirs = ["our_dataset/dataset_DR", "our_dataset/dataset_DME/1", "our_dataset/dataset_DME/3"]
+    root_dirs = ["our_dataset/original/DME_1", "our_dataset/original/DME_2", "our_dataset/original/DME_3", "our_dataset/original/DME_4", "our_dataset/original/DR"]
+    labels_table = []
+    for root_dir in root_dirs:
+        labels_table.append(pd.read_csv("%s/labels.csv" % root_dir)) 
+    labels_table = pd.concat(labels_table, ignore_index=True)
+    labels_table.to_csv('our_dataset/labels.csv', index=False)
+    print(labels_table)
+
     dataset = OCTDataset(root_dirs, transform=valid_transform())
     acc, f1m, f1mi = 0, 0, 0
     gt = [0.0, 1.0, ]#0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

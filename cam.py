@@ -1,29 +1,18 @@
-from operator import mod
-from statistics import mode
-from turtle import pd
-from model import MultiTaskModel
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, GuidedBackpropReLUModel
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
-from torchvision.models import resnet50
 import torch
-import os, time
-import glob
+import os
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
 import torchvision.models as models
 from oct_utils import OrgLabels, type_color
 from dataset import OCTDataset, valid_transform
-from torchcam.methods import SmoothGradCAMpp
 import matplotlib.pyplot as plt
 import cv2
 from pytorch_grad_cam.utils.image import show_cam_on_image, \
     deprocess_image, \
     preprocess_image
-from torch.autograd import Variable
 import torchvision.utils as vutils
-from torch import nn
 
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -53,8 +42,8 @@ def save_cam_during_train(params, cam):
         all_grey = [np.zeros((w, h))] * (len(OrgLabels) + 1)
         for cls in pred_classes:
             targets = [ClassifierOutputTarget(cls)]
-            input_tensor  = inputs["image"].to(args.device)
-            grayscale_cam = cam(input_tensor=input_tensor,targets=targets,eigen_smooth=False, aug_smooth=True)
+            # input_tensor  = inputs["image"].to(args.device)
+            grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=True)
             grayscale_cam = grayscale_cam[0, :]
 
             grey_thred = grayscale_cam.copy()

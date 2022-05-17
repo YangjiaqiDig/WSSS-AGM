@@ -2,6 +2,7 @@ import logging
 import os
 import time
 from collections import Counter
+from turtle import pd
 from pytorch_grad_cam import GradCAM
 import numpy as np
 import torch
@@ -133,7 +134,7 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler, gan
     total_loss = 0
     for batch, data in enumerate(trainloader):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)
-        updated_image = image
+        updated_image = image.clone()
         if (epoch + 1) > args.refine_epoch_point or args.continue_train:
             if (epoch + 1) > (args.refine_epoch_point + args.n_refine_background) or args.continue_train:
                 updated_image = refine_input_by_cam(model, updated_image, cam)
@@ -174,7 +175,7 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler,
     testloader.dataset.set_use_train_transform(False)
     for batch, data in tqdm(enumerate(testloader), total=int(len(test_subsampler) / testloader.batch_size)):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)
-        updated_image = image
+        updated_image = image.clone
         if (epoch + 1) > args.refine_epoch_point or args.continue_train:
             if (epoch + 1) > (args.refine_epoch_point + args.n_refine_background) or args.continue_train:
                 updated_image = refine_input_by_cam(model, updated_image, cam)
@@ -207,10 +208,9 @@ def train(args):
     torch.manual_seed(42)
     kfold = KFold(n_splits=args.k_folds, shuffle=False)
     dataset = OCTDataset(args, transform_train=train_transform(args.is_size), transform_val=valid_transform(args.is_size))
-    
     backbone = network_class(args)
     num_class = len(OrgLabels)
-    num_input_channel = dataset[0]['image'].shape[0]
+    num_input_channel = 6#dataset[0]['image'].shape[0]
     model = MultiTaskModel(backbone, num_class, num_input_channel)
     if args.continue_train:
         checkpoint = torch.load('{0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold))   
@@ -260,6 +260,5 @@ def train(args):
 
 if __name__ == "__main__":
     args = Configs().parse()
-    # train_multi_class(args)
     tb = SummaryWriter()
     train(args)
