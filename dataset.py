@@ -74,16 +74,6 @@ def valid_transform(is_size):
     ])
     return transform_seq
 
-def normal_transform(is_size):
-    transform_seq = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize(is_size),
-        transforms.ToTensor(),
-        # transforms.Normalize(mean=[0.485, 0.456, 0.406],
-        #                      std=[0.229, 0.224, 0.225])
-    ])
-    return transform_seq
-
 if __name__ == "__main__":
     root_dirs = ["our_dataset/original/DME_1", "our_dataset/original/DME_2", "our_dataset/original/DME_3", "our_dataset/original/DME_4", "our_dataset/original/DR"]
     labels_table = []

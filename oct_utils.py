@@ -1,9 +1,6 @@
-from turtle import pd
-import torch.nn as nn
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, classification_report
-
-LABELS = ['srf', 'irf', 'ezAtt', 'ezDis', 'hrd', 'rpe', 'rt', 'dril']
+from options import Configs
 type_color = {
     0: [0, 0, 0], # black
     1: [255, 0, 0], # srf red
@@ -13,8 +10,7 @@ type_color = {
     5: [255, 165, 0], # rpe orange
     6: [255, 0, 255] # back ground pink
 }
-OrgLabels = ['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround'] # 'EZ attenuated', 'EZ disrupted', 'Retinal Traction',  'Definite DRIL']
-# OrgLabels = ['SRF', 'IRF', 'HRD', 'BackGround']
+OrgLabels = Configs().get_labels()#['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround']
 # 0.8247863247863247 0.7519246396739377 0.8247863247863247
 # 0.8301282051282052 0.7603308530659053 0.8301282051282052
 def calculate_metrics(outputs, labels):

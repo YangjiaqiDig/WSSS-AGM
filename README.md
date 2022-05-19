@@ -24,5 +24,15 @@ Ablation work flow and model buildup tryings
 
 
 ## Experiment process and save direct
-- origin
+- origin: orig
+- bgrm_input: bgrm
+- origin + gan: orig_gan
+- bgrm_input + gan: bgrm_gan
+### all with augmentation: rotate + flip
+- origin: aug_orig
+- origin + gan: aug_orig_gan
+- origin + gan + background_label: aug_orig_gan_bgl
+- bgrm_input + gan + background_label: aug_bgrm_gan_bgl
+- origin + gan + background_label: base * 15, lesion * 10: refine_gan_v1
+
 

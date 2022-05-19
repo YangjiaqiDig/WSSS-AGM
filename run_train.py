@@ -2,7 +2,7 @@ import logging
 import os
 import time
 from collections import Counter
-from turtle import pd
+
 from pytorch_grad_cam import GradCAM
 import numpy as np
 import torch
@@ -13,7 +13,6 @@ from sklearn.model_selection import KFold
 from tqdm import tqdm
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from torch.utils.tensorboard import SummaryWriter
-import torchvision.utils as vutils
 
 from gan_inference import load_gan_model
 from cam import save_cam_results
@@ -24,9 +23,9 @@ from options import Configs
 from torchvision import transforms
 
 # logger = logging.getLogger(__file__).setLevel(logging.INFO)
-logging.basicConfig(level=logging.DEBUG)
-DEVICE_NR = '0'
+DEVICE_NR = '2'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
+logging.basicConfig(level=logging.DEBUG)
 
 def network_class(args):
     if args.backbone == "resnet18":
@@ -154,16 +153,7 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler, gan
     print('Epoch', str(epoch + 1), 'Train loss:', train_loss_epoch, "Train acc", train_acc_epoch)
     return train_loss_epoch, train_acc_epoch
 
-def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler, gan_pretrained):
-    save_path = f'./{args.save_folder}/fold-{fold}/weights'
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-    torch.save({
-        'epoch': epoch,
-        'args': args,
-        'state_dict': model.state_dict(),
-        'optimizer': optimizer.state_dict(),
-    }, save_path + "/{0}.pwf".format(epoch + 1))
+def valid_once(args, fold, epoch, testloader, model, test_subsampler, gan_pretrained):
     model.eval()
     loss_func = nn.BCELoss()
     # Evaluationfor this fold
@@ -174,8 +164,8 @@ def valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler,
     cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
     testloader.dataset.set_use_train_transform(False)
     for batch, data in tqdm(enumerate(testloader), total=int(len(test_subsampler) / testloader.batch_size)):
-        image, labels = data["image"].to(args.device), data["labels"].to(args.device)
-        updated_image = image.clone
+        image, labels = data["image"].to(args.device), data["labels"].to(args.device)        
+        updated_image = image.clone()
         if (epoch + 1) > args.refine_epoch_point or args.continue_train:
             if (epoch + 1) > (args.refine_epoch_point + args.n_refine_background) or args.continue_train:
                 updated_image = refine_input_by_cam(model, updated_image, cam)
@@ -210,15 +200,9 @@ def train(args):
     dataset = OCTDataset(args, transform_train=train_transform(args.is_size), transform_val=valid_transform(args.is_size))
     backbone = network_class(args)
     num_class = len(OrgLabels)
-    num_input_channel = 6#dataset[0]['image'].shape[0]
-    model = MultiTaskModel(backbone, num_class, num_input_channel)
-    if args.continue_train:
-        checkpoint = torch.load('{0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold))   
-        print('Loading pretrained model from checkpoint {0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold)) 
-        model.load_state_dict(checkpoint['state_dict'])
-    model = model.cuda() if args.device == "cuda" else model
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+    num_input_channel = dataset[0]['image'].shape[0] * 2 if args.input_gan else dataset[0]['image'].shape[0]
     num_of_epochs = args.num_iteration if args.continue_train else args.n_epochs
+    gan_pretrained = False
     if args.input_gan:
         with torch.no_grad():
             path = "{}/netG.pth".format(args.model_gan)
@@ -228,8 +212,16 @@ def train(args):
             
     start = time.time()
     # K-fold Cross Validation model evaluation
+    total_train_loss, total_val_loss, total_train_acc_matrix, total_val_acc_matrix = {}, {}, {}, {}
     for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
         logging.info(f'---------FOLD {fold}--------')
+        model = MultiTaskModel(backbone, num_class, num_input_channel)
+        if args.continue_train:
+            checkpoint = torch.load('{0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold))   
+            print('Loading pretrained model from checkpoint {0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold)) 
+            model.load_state_dict(checkpoint['state_dict'])
+        model = model.cuda() if args.device == "cuda" else model
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
         # # Sample elements randomly from a given list of ids, no replacement.
         train_subsampler = torch.utils.data.SubsetRandomSampler(train_ids)
         test_subsampler = torch.utils.data.SubsetRandomSampler(test_ids)
@@ -244,21 +236,42 @@ def train(args):
                         batch_size=args.valid_batch_size, sampler=test_subsampler, shuffle=False)
         for epoch in range(0, num_of_epochs):
             train_loss, train_acc_matrix = train_once(args, epoch, trainloader, model, optimizer, train_subsampler, gan_pretrained)
-            if (epoch + 1) % 5 == 0 or args.continue_train or (epoch + 1) > args.refine_epoch_point:
-                valid_loss, valid_acc_matrxi = valid_once(args, fold, epoch, testloader, model, optimizer, test_subsampler, gan_pretrained)
-                tb.add_scalars('Loss/Train', {'fold{}'.format(fold): train_loss}, epoch+1)
-                tb.add_scalars('Loss/Valid', {'fold{}'.format(fold): valid_loss}, epoch+1)
-                for acc_type in ['acc', 'f1m']:
-                    tb.add_scalars("Train Accuracy/{}".format(acc_type), {'fold{}'.format(fold): train_acc_matrix[acc_type]}, epoch)
-                    tb.add_scalars("Val Accuracy/{}".format(acc_type),  {'fold{}'.format(fold): valid_acc_matrxi[acc_type]}, epoch)
-                for label_type in OrgLabels:
-                    tb.add_scalars("Train Class Acc/{}".format(label_type), {'fold{}'.format(fold): train_acc_matrix[label_type]}, epoch)
-                    tb.add_scalars("Val Class Acc/{}".format(label_type), {'fold{}'.format(fold): valid_acc_matrxi[label_type]}, epoch)
+            total_train_loss[epoch] = total_train_loss[epoch] + train_loss if epoch in total_train_loss else 0
+            total_train_acc_matrix[epoch] =  {k: v + total_train_acc_matrix[epoch][k] for k, v in train_acc_matrix.items()} if epoch in total_train_acc_matrix else train_acc_matrix
+            
+            if (epoch + 1) % 1 == 0 or args.continue_train or (epoch + 1) > args.refine_epoch_point:
+                valid_loss, valid_acc_matrxi = valid_once(args, fold, epoch, testloader, model, test_subsampler, gan_pretrained)
+                total_val_loss[epoch] = total_val_loss[epoch] + valid_loss if epoch in total_val_loss else 0
+                total_val_acc_matrix[epoch] =  {k: v + total_val_acc_matrix[epoch][k] for k, v in valid_acc_matrxi.items()} if epoch in total_val_acc_matrix else valid_acc_matrxi
+            
+        ## Save model for last epoch
+        save_path = f'./{args.save_folder}/fold-{fold}/weights'
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        torch.save({
+            'epoch': epoch,
+            'args': args,
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+        }, save_path + "/{0}.pwf".format(epoch + 1)) 
+        
+    for epoch_nbr in total_train_loss:
+        tb.add_scalar('Loss/Train', total_train_loss[epoch_nbr] / args.k_folds, epoch_nbr+1)
+        for acc_type in ['acc', 'f1m']:
+            tb.add_scalar("Train Accuracy/{}".format(acc_type), total_train_acc_matrix[epoch_nbr][acc_type] / args.k_folds, epoch_nbr)
+        for label_type in OrgLabels:
+            tb.add_scalar("Train Class Acc/{}".format(label_type), total_train_acc_matrix[epoch_nbr][label_type] / args.k_folds, epoch_nbr)
+    for epoch_nbr in total_val_loss:
+        tb.add_scalar('Loss/Valid', total_val_loss[epoch_nbr] / args.k_folds, epoch_nbr+1)
+        for acc_type in ['acc', 'f1m']:
+            tb.add_scalar("Val Accuracy/{}".format(acc_type),  total_val_acc_matrix[epoch_nbr][acc_type] / args.k_folds, epoch_nbr)
+        for label_type in OrgLabels:
+            tb.add_scalar("Val Class Acc/{}".format(label_type), total_val_acc_matrix[epoch_nbr][label_type] / args.k_folds, epoch_nbr)
     tb.close()
     print('final running time:', time.time() - start)
 
 
 if __name__ == "__main__":
     args = Configs().parse()
-    tb = SummaryWriter()
+    tb = SummaryWriter('runs/{}'.format(args.save_folder.split('/')[-1]))
     train(args)
