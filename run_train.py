@@ -4,28 +4,28 @@ import time
 from collections import Counter
 
 from pytorch_grad_cam import GradCAM
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torchvision import transforms
 import torchvision.models as models
 from sklearn.model_selection import KFold
 from tqdm import tqdm
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from torch.utils.tensorboard import SummaryWriter
 
-from gan_inference import load_gan_model
-from cam import save_cam_results
-from dataset import (OCTDataset, train_transform, valid_transform)
-from model import MultiTaskModel
-from oct_utils import OrgLabels, calculate_metrics
-from options import Configs
-from torchvision import transforms
 
-# logger = logging.getLogger(__file__).setLevel(logging.INFO)
 DEVICE_NR = '2'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
+
+from gan_inference import load_gan_model
+from dataset import (OCTDataset, train_transform, valid_transform)
+from cam import save_cam_results
+from models import MultiTaskModel, CAM_Net, U_Net
+from oct_utils import OrgLabels, calculate_metrics
+from options import Configs
+
 
 def network_class(args):
     if args.backbone == "resnet18":
@@ -103,32 +103,34 @@ def refine_input_by_background_cam(model, image, cam, aug_smooth=True):
     return updated_input_tensor
 
 transform_norml = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-def train_once(args, epoch, trainloader, model, optimizer, train_subsampler, gan_pretrained):
+def train_once(args, epoch, trainloader, models, optimizer, train_subsampler, gan_pretrained):
+    cam_model, seg_model = models['cam'], models['seg']
+    cam_optimizer, seg_optimizer = optimizer['cam'], optimizer['seg']
     loss_func = nn.BCELoss()#nn.BCEWithLogitsLoss()#
-    model.train()
-    target_layers = [model.base_model.layer4[-1]]
-    cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
+    cam_model.train()
+    target_layers = [cam_model.base_model.layer4[-1]]
+    cam = GradCAM(model=cam_model, use_cuda=args.device, target_layers=target_layers)
     trainloader.dataset.set_use_train_transform(True)
     for batch, data in tqdm(enumerate(trainloader), total = int(len(train_subsampler)/trainloader.batch_size)):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)
         updated_image = image.clone()
         if (epoch + 1) > args.refine_epoch_point or args.continue_train:
             if (epoch + 1) > (args.refine_epoch_point + args.n_refine_background) or args.continue_train:
-                updated_image = refine_input_by_cam(model, updated_image, cam)
+                updated_image = refine_input_by_cam(cam_model, updated_image, cam)
             else:
-                updated_image = refine_input_by_background_cam(model, updated_image, cam)
+                updated_image = refine_input_by_background_cam(cam_model, updated_image, cam)
         if args.input_gan:
             input_for_gan = transform_norml(updated_image)
             gan_tensor = gan_pretrained.inference(input_for_gan)
             updated_image = torch.cat((image, gan_tensor), dim=1)
 
-        optimizer.zero_grad()
-        outputs = model(updated_image)
+        cam_optimizer.zero_grad()
+        outputs = cam_model(updated_image)
         loss_train = loss_func(outputs, labels)
         loss_train.backward()
-        optimizer.step()
+        cam_optimizer.step()
     
-    model.eval()
+    cam_model.eval()
     total_acc = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
     total_loss = 0
     for batch, data in enumerate(trainloader):
@@ -136,15 +138,15 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler, gan
         updated_image = image.clone()
         if (epoch + 1) > args.refine_epoch_point or args.continue_train:
             if (epoch + 1) > (args.refine_epoch_point + args.n_refine_background) or args.continue_train:
-                updated_image = refine_input_by_cam(model, updated_image, cam)
+                updated_image = refine_input_by_cam(cam_model, updated_image, cam)
             else:
-                updated_image = refine_input_by_background_cam(model, updated_image, cam)
+                updated_image = refine_input_by_background_cam(cam_model, updated_image, cam)
         if args.input_gan:
             input_for_gan = transform_norml(updated_image)
             gan_tensor = gan_pretrained.inference(input_for_gan)
             updated_image = torch.cat((image, gan_tensor), dim=1)
         with torch.no_grad():
-            outputs = model(updated_image)
+            outputs = cam_model(updated_image)
             loss_train = loss_func(outputs, labels)
             total_loss += loss_train.cpu().item()
             batch_accuracies_metrics = calculate_metrics(outputs, labels)
@@ -153,32 +155,33 @@ def train_once(args, epoch, trainloader, model, optimizer, train_subsampler, gan
     print('Epoch', str(epoch + 1), 'Train loss:', train_loss_epoch, "Train acc", train_acc_epoch)
     return train_loss_epoch, train_acc_epoch
 
-def valid_once(args, fold, epoch, testloader, model, test_subsampler, gan_pretrained):
-    model.eval()
+def valid_once(args, fold, epoch, testloader, models, test_subsampler, gan_pretrained):
+    cam_model, seg_model = models['cam'], models['seg']
+    cam_model.eval()
     loss_func = nn.BCELoss()
     # Evaluationfor this fold
     total_acc_val = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
     total_loss_val = 0
     # 
-    target_layers = [model.base_model.layer4[-1]]
-    cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
+    target_layers = [cam_model.base_model.layer4[-1]]
+    cam = GradCAM(model=cam_model, use_cuda=args.device, target_layers=target_layers)
     testloader.dataset.set_use_train_transform(False)
     for batch, data in tqdm(enumerate(testloader), total=int(len(test_subsampler) / testloader.batch_size)):
         image, labels = data["image"].to(args.device), data["labels"].to(args.device)        
         updated_image = image.clone()
         if (epoch + 1) > args.refine_epoch_point or args.continue_train:
             if (epoch + 1) > (args.refine_epoch_point + args.n_refine_background) or args.continue_train:
-                updated_image = refine_input_by_cam(model, updated_image, cam)
+                updated_image = refine_input_by_cam(cam_model, updated_image, cam)
             else:
-                updated_image = refine_input_by_background_cam(model, updated_image, cam)
+                updated_image = refine_input_by_background_cam(cam_model, updated_image, cam)
         if args.input_gan:
             input_for_gan = transform_norml(updated_image)
             gan_tensor = gan_pretrained.inference(input_for_gan)
             updated_image = torch.cat((image, gan_tensor), dim=1)
-        outputs = model(updated_image)
+        outputs = cam_model(updated_image)
         # maybe only for args.n_epochs in first condition
         if (epoch + 1) % 5 == 0 or args.continue_train or (epoch + 1) > args.refine_epoch_point: 
-            params = {'args': args, 'epoch': epoch, 'model': model, 'fold': fold, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
+            params = {'args': args, 'epoch': epoch, 'model': cam_model, 'fold': fold, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
             save_cam_results(params)
         with torch.no_grad():
             loss_val = loss_func(outputs, labels)
@@ -215,13 +218,24 @@ def train(args):
     total_train_loss, total_val_loss, total_train_acc_matrix, total_val_acc_matrix = {}, {}, {}, {}
     for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
         logging.info(f'---------FOLD {fold}--------')
-        model = MultiTaskModel(backbone, num_class, num_input_channel)
+        # model = MultiTaskModel(backbone, num_class, num_input_channel)
+        shared_model = MultiTaskModel(backbone, num_input_channel)
+        cam_model = CAM_Net(shared_model, num_class)
+        seg_model = U_Net(shared_model, num_class)
+
         if args.continue_train:
             checkpoint = torch.load('{0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold))   
             print('Loading pretrained model from checkpoint {0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold)) 
-            model.load_state_dict(checkpoint['state_dict'])
-        model = model.cuda() if args.device == "cuda" else model
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+            cam_model.load_state_dict(checkpoint['state_dict'])
+        cam_model = cam_model.cuda() if args.device == "cuda" else cam_model
+        seg_model = seg_model.cuda if args.device == "cuda" else seg_model
+        
+        cam_optimizer = optim.SGD(cam_model.parameters(), lr=args.lr, momentum=0.9)
+        seg_optimizer = optim.Adam(seg_model.parameters(), lr=args.lr)
+        
+        models = {"cam": cam_model, "seg": seg_model}
+        optimizer = {"cam": cam_optimizer, "seg": seg_optimizer}
+        
         # # Sample elements randomly from a given list of ids, no replacement.
         train_subsampler = torch.utils.data.SubsetRandomSampler(train_ids)
         test_subsampler = torch.utils.data.SubsetRandomSampler(test_ids)
@@ -235,12 +249,12 @@ def train(args):
                         num_workers=8,
                         batch_size=args.valid_batch_size, sampler=test_subsampler, shuffle=False)
         for epoch in range(0, num_of_epochs):
-            train_loss, train_acc_matrix = train_once(args, epoch, trainloader, model, optimizer, train_subsampler, gan_pretrained)
+            train_loss, train_acc_matrix = train_once(args, epoch, trainloader, models, optimizer, train_subsampler, gan_pretrained)
             total_train_loss[epoch] = total_train_loss[epoch] + train_loss if epoch in total_train_loss else 0
             total_train_acc_matrix[epoch] =  {k: v + total_train_acc_matrix[epoch][k] for k, v in train_acc_matrix.items()} if epoch in total_train_acc_matrix else train_acc_matrix
             
-            if (epoch + 1) % 1 == 0 or args.continue_train or (epoch + 1) > args.refine_epoch_point:
-                valid_loss, valid_acc_matrxi = valid_once(args, fold, epoch, testloader, model, test_subsampler, gan_pretrained)
+            if (epoch + 1) % 5 == 0 or args.continue_train or (epoch + 1) > args.refine_epoch_point:
+                valid_loss, valid_acc_matrxi = valid_once(args, fold, epoch, testloader, models, test_subsampler, gan_pretrained)
                 total_val_loss[epoch] = total_val_loss[epoch] + valid_loss if epoch in total_val_loss else 0
                 total_val_acc_matrix[epoch] =  {k: v + total_val_acc_matrix[epoch][k] for k, v in valid_acc_matrxi.items()} if epoch in total_val_acc_matrix else valid_acc_matrxi
             
