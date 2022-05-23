@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 from gan_inference import load_gan_model
 from dataset import (OCTDataset, train_transform, valid_transform)
-from cam import save_cam_results
+from cam import save_cam_results, refine_input_by_cam, refine_input_by_background_cam, get_pseudo_label
 from models import MultiTaskModel, CAM_Net, U_Net
 from oct_utils import OrgLabels, calculate_metrics
 from options import Configs
@@ -44,71 +44,14 @@ def network_class(args):
         raise NotImplementedError("No backbone found for '{}'".format(args.backbone))   
     return backbone
 
-'''
-5 labels: image -> 2 / 5 (irf, ez)  -> class_prob > 0.5
-[0.1, 0.8, 0.1, 0.8, 1]
-cam * 5 -> prob (0-1)
-Muli(cam) -> 0
-Sum(cam5) -> 1
-filter cam5 -> cam2 -> Sum() -> normalize
-'''
-def refine_input_by_cam(model, image, cam, aug_smooth=True):
-    outputs = model(image)
-    bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
-    batch_cam_masks = []
-    for cls in range(len(OrgLabels)):
-        targets = [ClassifierOutputTarget(cls)] * len(image) # for all in batch return the current class cam
-        batch_grayscale_cam = cam(input_tensor=image,targets=targets,eigen_smooth=False, aug_smooth=aug_smooth)
-        grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
-        grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels
-        batch_cam_masks.append(grayscale_tensor) # cls, [batch, 3, w, h]
-    updated_input_tensor = image.clone()
-    for batch_idx in range(len(bacth_preds)):
-        singel_cam_masks = [batch_cam_mask[batch_idx] for batch_cam_mask in batch_cam_masks] # cls, [3, w, h]
-        curr_preds = bacth_preds[batch_idx] # (cls)
-        '''if predict 1, keep the class cam, else 0, turn cam to 0 black image. Except last class BackGround'''
-        target_classes_cam = [class_cam * curr_preds[l] for l, class_cam in enumerate(singel_cam_masks[:-1])]
-        # sum the cams for predicted classes
-        sum_masks = sum(target_classes_cam)
-        # normalize the above 'attention map' to 0-1
-        min, max = sum_masks.min(), sum_masks.max()
-        sum_masks.add_(-min).div_(max - min + 1e-5) 
-        # BackGround CAM * normalized CAM * Original Image. does norm -> multiply order matter?
-        background_mask = singel_cam_masks[-1] # Background CAM
-        
-        soft_apply = sum_masks * background_mask * image[batch_idx, :3,] # [3, w, h]
-        soft_min, soft_max = soft_apply.min(), soft_apply.max()
-        soft_apply.add_(-soft_min).div_(soft_max - soft_min + 1e-5)
-        
-        updated_input_tensor[batch_idx, :3,] = soft_apply
-    return updated_input_tensor
-
-def refine_input_by_background_cam(model, image, cam, aug_smooth=True):
-    outputs = model(image)
-    bacth_bg_preds = (outputs[:, -1] > 0.5) * 1 # [batch] -> (0,1)
-    bg_cls = len(OrgLabels) - 1
-    targets = [ClassifierOutputTarget(bg_cls)] * len(image) # for all in batch return the background cam
-    batch_grayscale_cam = cam(input_tensor=image,targets=targets,eigen_smooth=False, aug_smooth=aug_smooth)
-    grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
-    grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels [batch, 3, w, h]
-    
-    updated_input_tensor = image.clone() # [batch, c, w, h]
-    '''Apply background cam on original image'''
-    # BackGround CAM * Original Image for predicted 1 background image only.
-    for batch_idx, bg_pred in enumerate(bacth_bg_preds):
-        soft_apply = grayscale_tensor[batch_idx] * image[batch_idx, :3,] if bg_pred > 0 else image[batch_idx, :3] # [3, w, h]
-        soft_min, soft_max = soft_apply.min(), soft_apply.max()
-        soft_apply.add_(-soft_min).div_(soft_max - soft_min + 1e-5)
-        updated_input_tensor[batch_idx, :3,] = soft_apply
-    return updated_input_tensor
-
 transform_norml = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 def train_once(args, epoch, trainloader, models, optimizer, train_subsampler, gan_pretrained):
     cam_model, seg_model = models['cam'], models['seg']
     cam_optimizer, seg_optimizer = optimizer['cam'], optimizer['seg']
-    loss_func = nn.BCELoss()#nn.BCEWithLogitsLoss()#
+    loss_cam = nn.BCELoss()#nn.BCEWithLogitsLoss()#
+    loss_seg = nn.CrossEntropyLoss()
     cam_model.train()
-    target_layers = [cam_model.base_model.layer4[-1]]
+    target_layers = [cam_model.multi_task_model.base_model[-1][-1]]
     cam = GradCAM(model=cam_model, use_cuda=args.device, target_layers=target_layers)
     trainloader.dataset.set_use_train_transform(True)
     for batch, data in tqdm(enumerate(trainloader), total = int(len(train_subsampler)/trainloader.batch_size)):
@@ -126,7 +69,7 @@ def train_once(args, epoch, trainloader, models, optimizer, train_subsampler, ga
 
         cam_optimizer.zero_grad()
         outputs = cam_model(updated_image)
-        loss_train = loss_func(outputs, labels)
+        loss_train = loss_cam(outputs, labels)
         loss_train.backward()
         cam_optimizer.step()
     
@@ -147,7 +90,7 @@ def train_once(args, epoch, trainloader, models, optimizer, train_subsampler, ga
             updated_image = torch.cat((image, gan_tensor), dim=1)
         with torch.no_grad():
             outputs = cam_model(updated_image)
-            loss_train = loss_func(outputs, labels)
+            loss_train = loss_cam(outputs, labels)
             total_loss += loss_train.cpu().item()
             batch_accuracies_metrics = calculate_metrics(outputs, labels)
             total_acc += Counter(batch_accuracies_metrics)
@@ -162,7 +105,6 @@ def valid_once(args, fold, epoch, testloader, models, test_subsampler, gan_pretr
     # Evaluationfor this fold
     total_acc_val = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
     total_loss_val = 0
-    # 
     target_layers = [cam_model.base_model.layer4[-1]]
     cam = GradCAM(model=cam_model, use_cuda=args.device, target_layers=target_layers)
     testloader.dataset.set_use_train_transform(False)
@@ -228,7 +170,7 @@ def train(args):
             print('Loading pretrained model from checkpoint {0}/fold-{1}/weights/25.pwf'.format(args.save_folder, fold)) 
             cam_model.load_state_dict(checkpoint['state_dict'])
         cam_model = cam_model.cuda() if args.device == "cuda" else cam_model
-        seg_model = seg_model.cuda if args.device == "cuda" else seg_model
+        seg_model = seg_model.cuda() if args.device == "cuda" else seg_model
         
         cam_optimizer = optim.SGD(cam_model.parameters(), lr=args.lr, momentum=0.9)
         seg_optimizer = optim.Adam(seg_model.parameters(), lr=args.lr)

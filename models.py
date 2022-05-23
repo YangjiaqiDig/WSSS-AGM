@@ -68,10 +68,10 @@ class U_Net(nn.Module):
         x = self.up_4(x)
         x = torch.cat([x, conv1], dim=1)
         x = self.conv_up_4(x)
-        x = self.conv_final(x)
-        likelihood_map = self.softmax(x)
+        out = self.conv_final(x)
+        # out = self.softmax(out)
 
-        return likelihood_map
+        return out
 
 class CAM_Net(nn.Module):
     def __init__(self, multi_task_model, num_class):
@@ -92,7 +92,7 @@ class MultiTaskModel(nn.Module):
     def __init__(self, backbone, num_input_channel=3):
         super().__init__()
         self.base_model = backbone  # take the model without classifier
-        self.base_model.conv1 = nn.Conv2d(num_input_channel, 64, kernel_size=7, stride=2, padding=3,bias=False)
+        self.base_model.conv1 = nn.Conv2d(num_input_channel, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.base_model = torch.nn.Sequential(*(list(self.base_model.children())[:-2]))
 
     def forward(self, x):

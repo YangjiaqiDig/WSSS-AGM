@@ -159,64 +159,79 @@ def save_cam_results(params, is_inference=False):
         save_cam_for_inference(params, cam)
         return
     save_cam_during_train(params, cam)
+
+'''
+5 labels: image -> 2 / 5 (irf, ez)  -> class_prob > 0.5
+[0.1, 0.8, 0.1, 0.8, 1]
+cam * 5 -> prob (0-1)
+Muli(cam) -> 0
+Sum(cam5) -> 1
+filter cam5 -> cam2 -> Sum() -> normalize
+'''
+def refine_input_by_cam(model, image, cam, aug_smooth=True):
+    outputs = model(image)
+    bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
+    batch_cam_masks = []
+    for cls in range(len(OrgLabels)):
+        targets = [ClassifierOutputTarget(cls)] * len(image) # for all in batch return the current class cam
+        batch_grayscale_cam = cam(input_tensor=image,targets=targets,eigen_smooth=False, aug_smooth=aug_smooth)
+        grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
+        grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels
+        batch_cam_masks.append(grayscale_tensor) # cls, [batch, 3, w, h]
+    updated_input_tensor = image.clone()
+    for batch_idx in range(len(bacth_preds)):
+        singel_cam_masks = [batch_cam_mask[batch_idx] for batch_cam_mask in batch_cam_masks] # cls, [3, w, h]
+        curr_preds = bacth_preds[batch_idx] # (cls)
+        '''if predict 1, keep the class cam, else 0, turn cam to 0 black image. Except last class BackGround'''
+        target_classes_cam = [class_cam * curr_preds[l] for l, class_cam in enumerate(singel_cam_masks[:-1])]
+        # sum the cams for predicted classes
+        sum_masks = sum(target_classes_cam)
+        # normalize the above 'attention map' to 0-1
+        min, max = sum_masks.min(), sum_masks.max()
+        sum_masks.add_(-min).div_(max - min + 1e-5) 
+        # BackGround CAM * normalized CAM * Original Image. does norm -> multiply order matter?
+        background_mask = singel_cam_masks[-1] # Background CAM
+        
+        soft_apply = sum_masks * background_mask * image[batch_idx, :3,] # [3, w, h]
+        soft_min, soft_max = soft_apply.min(), soft_apply.max()
+        soft_apply.add_(-soft_min).div_(soft_max - soft_min + 1e-5)
+        
+        updated_input_tensor[batch_idx, :3,] = soft_apply
+    return updated_input_tensor
+
+def refine_input_by_background_cam(model, image, cam, aug_smooth=True):
+    outputs = model(image)
+    bacth_bg_preds = (outputs[:, -1] > 0.5) * 1 # [batch] -> (0,1)
+    bg_cls = len(OrgLabels) - 1
+    targets = [ClassifierOutputTarget(bg_cls)] * len(image) # for all in batch return the background cam
+    batch_grayscale_cam = cam(input_tensor=image,targets=targets,eigen_smooth=False, aug_smooth=aug_smooth)
+    grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
+    grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels [batch, 3, w, h]
     
+    updated_input_tensor = image.clone() # [batch, c, w, h]
+    '''Apply background cam on original image'''
+    # BackGround CAM * Original Image for predicted 1 background image only.
+    for batch_idx, bg_pred in enumerate(bacth_bg_preds):
+        soft_apply = grayscale_tensor[batch_idx] * image[batch_idx, :3,] if bg_pred > 0 else image[batch_idx, :3] # [3, w, h]
+        soft_min, soft_max = soft_apply.min(), soft_apply.max()
+        soft_apply.add_(-soft_min).div_(soft_max - soft_min + 1e-5)
+        updated_input_tensor[batch_idx, :3,] = soft_apply
+    return updated_input_tensor
+
+def get_pseudo_label(model, image, cam, aug_smooth=True):
+    outputs = model(image)
+    bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
+    batch_cam_masks = []
+    for cls in range(len(OrgLabels)):
+        targets = [ClassifierOutputTarget(cls)] * len(image) # for all in batch return the current class cam
+        batch_grayscale_cam = cam(input_tensor=image,targets=targets,eigen_smooth=False, aug_smooth=aug_smooth)
+        grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
+        grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels
+        batch_cam_masks.append(grayscale_tensor) # cls, [batch, 3, w, h]
+    updated_input_tensor = image.clone()
+    return updated_input_tensor
+
 if __name__ == "__main__":
     backbone = models.resnet18(pretrained=True)
     num_class = len(OrgLabels)
     device="cuda" if torch.cuda.is_available() else "cpu"
-    # model= MultiTaskModel(backbone, num_class).to(device)
-
-    # # if device == "cuda":
-    # #     print("GPU: ", torch.cuda.device_count())
-    # #     model = torch.nn.DataParallel(model, device_ids=list(
-    # #         range(torch.cuda.device_count()))).cuda()
-        
-    # checkpoint = torch.load('outputs/results_5labels/fold-0/50.pwf')    
-    # model.load_state_dict(checkpoint['state_dict'])
-
-    # model.eval()
-    # target_layers = [model.base_model.layer4[-1]]
-
-    # cam = GradCAM(model=model, use_cuda=device, target_layers=target_layers)
-    # cam_extractor = SmoothGradCAMpp(model)
-
-    # Number = 1
-
-    # root_dirs = ["examples/data"]
-    # dataset = OCTDataset(root_dirs, transform=valid_transform())
-    # input_tensor = dataset[Number]["image"]
-    # rgb_img = (np.float32(input_tensor.permute(1, 2, 0)))
-    # print(dataset[Number]["labels"], dataset[Number]["path"])
-    # plt.imshow(rgb_img); plt.axis('off'); plt.tight_layout(); plt.show()
-    # plt.savefig(f'examples/temp/ori.jpg' )
-    # input_tensor = input_tensor.unsqueeze(0).to(device)
-    # output = model(input_tensor)
-    # print(output)
-    
-
-    # # ['srf', 'irf', 'ezAtt', 'ezDis', 'hrd', 'rpe', 'rt', 'dril']
-    # # activation_map = cam_extractor(output.squeeze(0).argmax().item(), output)
-    # targets = [ClassifierOutputTarget(7)]
-    # print(input_tensor.shape, targets)
-    # grayscale_cam = cam(input_tensor=input_tensor,targets=targets,eigen_smooth=False, aug_smooth=True)
-    # grayscale_cam = grayscale_cam[0, :]
-    # # grayscale_cam[grayscale_cam<0.5] =0 
-
-    # # Visualize the raw CAM
-    # # plt.imshow(grayscale_cam); plt.axis('off'); plt.tight_layout(); plt.show()
-    # # print(grayscale_cam, grayscale_cam.shape, rgb_img.shape)
-    # visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
-    # # plt.imshow(visualization); plt.axis('off'); plt.tight_layout(); plt.show()
-    # # plt.savefig('test.png')
-
-    # cam_image = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
-    # gb_model = GuidedBackpropReLUModel(model=model, use_cuda=device)
-    # gb = gb_model(input_tensor, target_category=None)
-    # cam_mask = cv2.merge([grayscale_cam, grayscale_cam, grayscale_cam])
-    # cam_gb = deprocess_image(cam_mask * gb)
-    # gb = deprocess_image(gb)
-
-    # save_root = 'examples/temp'
-    # cv2.imwrite(f'%s/cam.jpg' % save_root, cam_image)
-    # cv2.imwrite(f'%s/gb.jpg' % save_root, gb)
-    # cv2.imwrite(f'%s/cam_gb.jpg'% save_root, cam_gb)

@@ -23,7 +23,7 @@ class Configs():
                             help="root datasets directory")
         self.parser.add_argument("--k_folds", type=int,
                             default=10, help="k folds")
-        self.parser.add_argument("--save_folder", type=str, default="outputs/aug_orig_gan_bgl",
+        self.parser.add_argument("--save_folder", type=str, default="outputs/seg_orig",
                             help="Path or url of the dataset")
         self.parser.add_argument("--train_batch_size", type=int,
                             default=8, help="Batch size for training")
