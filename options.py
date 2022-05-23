@@ -23,7 +23,7 @@ class Configs():
                             help="root datasets directory")
         self.parser.add_argument("--k_folds", type=int,
                             default=10, help="k folds")
-        self.parser.add_argument("--save_folder", type=str, default="outputs/seg_orig",
+        self.parser.add_argument("--save_folder", type=str, default="outputs/refine_gan_v2",
                             help="Path or url of the dataset")
         self.parser.add_argument("--train_batch_size", type=int,
                             default=8, help="Batch size for training")
@@ -32,13 +32,13 @@ class Configs():
         self.parser.add_argument("--lr", type=float,
                             default=0.0001, help="Learning rate")
         self.parser.add_argument("--cam_type", type=str, default="gradcam", help="GradCAM")
-        self.parser.add_argument("--n_epochs", type=int, default=25, #25
+        self.parser.add_argument("--n_epochs", type=int, default=35, #25
                             help="Number of training epochs")
-        self.parser.add_argument("--refine_epoch_point", type=int, default=150, 
+        self.parser.add_argument("--refine_epoch_point", type=int, default=25, 
                             help="The start epoch for refine input by cam")
-        self.parser.add_argument("--n_refine_background", type=int, default=0, 
+        self.parser.add_argument("--n_refine_background", type=int, default=5, 
                             help="Number of background only refinement")
-        self.parser.add_argument("--check_point", type=str, default="/fold-0/25.pwf",
+        self.parser.add_argument("--check_point", type=str, default="outputs/aug_orig_gan_bgl",
                             help="Path of the pre-trained Network")
         self.parser.add_argument("--continue_train", type=bool, default=False, help="Continue train")
         self.parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
@@ -49,7 +49,7 @@ class Configs():
         self.parser.add_argument("--combine_ez", type=bool, default=True, help="If combine ez two conditions")
         self.parser.add_argument("--is_size", default=(256, 256), help="resize of input image, need same size as GANs generation") #(500,750)
         self.parser.add_argument("--save_inference", type=str, default='outputs_inference', help="Save inference or test images directory")
-        self.parser.add_argument("--num_iteration", type=int, default=10, help="Number of iterations for refine CAM")
+        self.parser.add_argument("--num_iteration", type=int, default=5, help="Number of iterations for refine CAM")
         self.parser.add_argument("--labels", type=str, default=['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround'], help="['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround', 'EZ attenuated', 'EZ disrupted', 'Retinal Traction', 'Definite DRIL']")
     def parse(self):
         args = self.parser.parse_args()

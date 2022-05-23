@@ -150,10 +150,10 @@ def save_cam_results(params, is_inference=False):
     model = params['model']
     # batch_preds [BC] B: batch, C: Class
     if args.cam_type == 'gradcam':
-        target_layers = [model.base_model.layer4[-1]]
+        target_layers = [model.multi_task_model.base_model[-1][-1]]
         cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
     else: 
-        target_layers = [model.base_model.layer4[-1]]
+        target_layers = [model.multi_task_model.base_model[-1][-1]]
         cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
     if is_inference:
         save_cam_for_inference(params, cam)
@@ -168,7 +168,7 @@ Muli(cam) -> 0
 Sum(cam5) -> 1
 filter cam5 -> cam2 -> Sum() -> normalize
 '''
-def refine_input_by_cam(model, image, cam, aug_smooth=True):
+def refine_input_by_cam(args, model, image, cam, aug_smooth=True):
     outputs = model(image)
     bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
     batch_cam_masks = []
@@ -199,7 +199,7 @@ def refine_input_by_cam(model, image, cam, aug_smooth=True):
         updated_input_tensor[batch_idx, :3,] = soft_apply
     return updated_input_tensor
 
-def refine_input_by_background_cam(model, image, cam, aug_smooth=True):
+def refine_input_by_background_cam(args, model, image, cam, aug_smooth=True):
     outputs = model(image)
     bacth_bg_preds = (outputs[:, -1] > 0.5) * 1 # [batch] -> (0,1)
     bg_cls = len(OrgLabels) - 1
@@ -218,7 +218,7 @@ def refine_input_by_background_cam(model, image, cam, aug_smooth=True):
         updated_input_tensor[batch_idx, :3,] = soft_apply
     return updated_input_tensor
 
-def get_pseudo_label(model, image, cam, aug_smooth=True):
+def get_pseudo_label(args, model, image, cam, aug_smooth=True):
     outputs = model(image)
     bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
     batch_cam_masks = []
@@ -228,8 +228,7 @@ def get_pseudo_label(model, image, cam, aug_smooth=True):
         grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
         grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels
         batch_cam_masks.append(grayscale_tensor) # cls, [batch, 3, w, h]
-    updated_input_tensor = image.clone()
-    return updated_input_tensor
+    
 
 if __name__ == "__main__":
     backbone = models.resnet18(pretrained=True)

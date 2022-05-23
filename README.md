@@ -33,6 +33,6 @@ Ablation work flow and model buildup tryings
 - origin + gan: aug_orig_gan
 - origin + gan + background_label: aug_orig_gan_bgl
 - bgrm_input + gan + background_label: aug_bgrm_gan_bgl
-- origin + gan + background_label: base * 15, lesion * 10: refine_gan_v1
-
+- origin + gan + background_label: base * 25, lesion * 5: refine_gan_v1
+- origin + gan + background_label: base * 25, bg * 5, lesion * 5: refine_gan_v2
 
