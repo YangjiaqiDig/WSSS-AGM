@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-from oct_utils import OrgLabels
+from utils import OrgLabels
 import torch
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score

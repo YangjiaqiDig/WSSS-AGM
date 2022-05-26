@@ -7,7 +7,7 @@ import os
 from cam import save_cam_results
 from dataset import (OCTDataset, normal_transform, train_transform, valid_transform)
 from model import MultiTaskModel
-from oct_utils import OrgLabels, calculate_metrics
+from utils import OrgLabels, calculate_metrics
 from options import Configs
 from run_train import network_class
 

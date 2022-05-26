@@ -5,7 +5,7 @@ import torch
 import os
 import numpy as np
 import torchvision.models as models
-from oct_utils import OrgLabels, type_color
+from utils import OrgLabels, type_color
 import matplotlib.pyplot as plt
 import cv2
 from pytorch_grad_cam.utils.image import show_cam_on_image, \
