@@ -218,16 +218,30 @@ def refine_input_by_background_cam(args, model, image, cam, aug_smooth=True):
         updated_input_tensor[batch_idx, :3,] = soft_apply
     return updated_input_tensor
 
-def get_pseudo_label(args, model, image, cam, aug_smooth=True):
-    outputs = model(image)
-    bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
-    batch_cam_masks = []
-    for cls in range(len(OrgLabels)):
-        targets = [ClassifierOutputTarget(cls)] * len(image) # for all in batch return the current class cam
-        batch_grayscale_cam = cam(input_tensor=image,targets=targets,eigen_smooth=False, aug_smooth=aug_smooth)
-        grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
-        grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels
-        batch_cam_masks.append(grayscale_tensor) # cls, [batch, 3, w, h]
+def get_pseudo_label(params, cam):
+    inputs, batch_preds, updated_image = params['inputs'], params['batch_preds'], params['refined']
+    for i, pred in enumerate(batch_preds):
+        w, h = inputs["image"][i].shape[-2], inputs["image"][i].shape[-1]
+        pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
+        save_cam_in_row = []        
+        all_grey = [np.zeros((w, h))] * (len(OrgLabels) + 1)
+        for cls in pred_classes:
+            targets = [ClassifierOutputTarget(cls)]
+            grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=True)
+            grayscale_cam = grayscale_cam[0, :]
+
+            grey_thred = grayscale_cam.copy()
+            grey_thred[grey_thred < 0.8] = 0
+            if OrgLabels[-1] == 'BackGround' and cls != (len(OrgLabels)-1): # dont illustrate the background
+                all_grey[cls + 1] = grey_thred
+            save_class_name =  save_class_name + '_' + OrgLabels[cls]
+        
+        labels = np.argmax(np.array(all_grey), axis=0)
+        color_mask = np.zeros((w, h, 3))
+        for i in range(1, len(OrgLabels) + 1):
+            mask = labels == i
+            color_mask[:,:,][mask] = type_color[i]
+        
     
 
 if __name__ == "__main__":

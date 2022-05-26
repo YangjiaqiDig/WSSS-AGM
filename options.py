@@ -23,7 +23,7 @@ class Configs():
                             help="root datasets directory")
         self.parser.add_argument("--k_folds", type=int,
                             default=10, help="k folds")
-        self.parser.add_argument("--save_folder", type=str, default="outputs/refine_gan_v2",
+        self.parser.add_argument("--save_folder", type=str, default="outputs/aug_orig_gan_bgl_v2",
                             help="Path or url of the dataset")
         self.parser.add_argument("--train_batch_size", type=int,
                             default=8, help="Batch size for training")
@@ -32,11 +32,11 @@ class Configs():
         self.parser.add_argument("--lr", type=float,
                             default=0.0001, help="Learning rate")
         self.parser.add_argument("--cam_type", type=str, default="gradcam", help="GradCAM")
-        self.parser.add_argument("--n_epochs", type=int, default=35, #25
+        self.parser.add_argument("--n_epochs", type=int, default=50, #25
                             help="Number of training epochs")
-        self.parser.add_argument("--refine_epoch_point", type=int, default=25, 
+        self.parser.add_argument("--refine_epoch_point", type=int, default=100, 
                             help="The start epoch for refine input by cam")
-        self.parser.add_argument("--n_refine_background", type=int, default=5, 
+        self.parser.add_argument("--n_refine_background", type=int, default=0, 
                             help="Number of background only refinement")
         self.parser.add_argument("--check_point", type=str, default="outputs/aug_orig_gan_bgl",
                             help="Path of the pre-trained Network")
