@@ -43,11 +43,21 @@ def network_class(args):
         raise NotImplementedError("No backbone found for '{}'".format(args.backbone))   
     return backbone
 
+def dsc_loss(y_pred, y_true, varepsilon=1.e-8):
+    epsilon = 1.e-8
+    y_true = y_true.float()
+    y_pred = torch.clamp(y_pred, epsilon, 1. - epsilon)
+
+    numerator = 2 * (y_true * y_pred * (1-y_pred)).sum() + varepsilon
+    denominator = (y_true + y_pred * (1-y_pred)).sum() + varepsilon
+
+    return 1 - numerator / denominator
+
 class Train():
     def __init__(self):
         self.args = Configs().parse()
         self.tb = SummaryWriter('runs/{}'.format(self.args.save_folder.split('/')[-1]))
-        self.device = self.device 
+        self.device = self.args.device 
         if self.device == "cuda":
             print("Number of GPUs: ", torch.cuda.device_count(), "Device Nbr: ", DEVICE_NR)
             
@@ -85,11 +95,9 @@ class Train():
         
         self.loss_cam = nn.BCELoss()#nn.BCEWithLogitsLoss()#
         self.loss_seg = nn.CrossEntropyLoss()        
-        self.loss_dic = 0
         
     def valid_once(self, epoch, fold):
         self.cam_model.eval()
-        loss_func = nn.BCELoss()
         # Evaluationfor this fold
         total_acc_val = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
         total_loss_val = 0
@@ -116,7 +124,8 @@ class Train():
                 params = {'args': self.args, 'epoch': epoch, 'model': self.cam_model, 'fold': fold, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
                 save_cam_results(params)
             with torch.no_grad():
-                loss_val = loss_func(outputs, labels)
+                loss_val = self.loss_cam(outputs, labels)
+                loss_dice = dsc_loss(outputs, labels)
                 total_loss_val += loss_val.cpu().item()
                 batch_accuracies_metrics = calculate_metrics(outputs, labels)
                 total_acc_val += Counter(batch_accuracies_metrics)
@@ -127,7 +136,7 @@ class Train():
         valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
         roc_avg, roc_class = calculate_roc(pred_list, gt_list)
         # print(f'K-FOLD CROSS VALIDATION RESULTS FOR {fold} FOLDS')
-        print('Val loss:', valid_loss_epoch, 'Val ROC', roc_avg,  "ROC per class", roc_class, "Val acc:", valid_acc_epoch)
+        print('- Val loss:', valid_loss_epoch, '- Val ROC:', roc_avg,  "- ROC per class:", roc_class, "- Val acc:", valid_acc_epoch)
         return valid_loss_epoch, valid_acc_epoch, roc_avg, roc_class
 
     def train_once(self, epoch):
@@ -150,6 +159,7 @@ class Train():
             self.cam_optimizer.zero_grad()
             outputs = self.cam_model(updated_image)
             loss_train = self.loss_cam(outputs, labels)
+            loss_dice = dsc_loss(outputs, labels)
             loss_train.backward()
             self.cam_optimizer.step()
         
@@ -173,6 +183,7 @@ class Train():
             with torch.no_grad():
                 outputs = self.cam_model(updated_image)
                 loss_train = self.loss_cam(outputs, labels)
+                loss_dice = dsc_loss(outputs, labels)
                 total_loss += loss_train.cpu().item()
                 batch_accuracies_metrics = calculate_metrics(outputs, labels)
                 total_acc += Counter(batch_accuracies_metrics)
@@ -181,7 +192,7 @@ class Train():
             
         train_acc_epoch, train_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc.items()}, total_loss / (batch + 1)
         roc_avg, roc_class = calculate_roc(pred_list, gt_list)
-        print('Epoch', str(epoch + 1), 'Train loss:', train_loss_epoch, 'Train ROC', roc_avg,  "ROC per class", roc_class, "Train acc", train_acc_epoch)
+        print('Epoch', str(epoch + 1), '- Train loss:', train_loss_epoch, '- Train ROC:', roc_avg,  "- ROC per class:", roc_class, "- Train acc:", train_acc_epoch)
         return train_loss_epoch, train_acc_epoch, roc_avg, roc_class
 
     def train(self):

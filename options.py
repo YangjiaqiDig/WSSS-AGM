@@ -23,7 +23,7 @@ class Configs():
                             help="root datasets directory")
         self.parser.add_argument("--k_folds", type=int,
                             default=10, help="k folds")
-        self.parser.add_argument("--save_folder", type=str, default="outputs/aug_orig_gan_bgl_v2",
+        self.parser.add_argument("--save_folder", type=str, default="outputs/orig_dice",
                             help="Path or url of the dataset")
         self.parser.add_argument("--train_batch_size", type=int,
                             default=8, help="Batch size for training")
@@ -43,7 +43,7 @@ class Configs():
         self.parser.add_argument("--continue_train", type=bool, default=False, help="Continue train")
         self.parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
         self.parser.add_argument("--backbone", type=str, default="resnet18", help="resnet18, resnet50, resnet101, vgg16")
-        self.parser.add_argument("--input_gan", type=bool, default=True, help="If involve GANs generation as input")
+        self.parser.add_argument("--input_gan", type=bool, default=False, help="If involve GANs generation as input")
         self.parser.add_argument("--model_gan", type=str, default='pretrained/gan/regular/best', help="Pretrained GAN Model path")
         self.parser.add_argument("--input_structure", type=bool, default=False, help="If involve Struture as input")
         self.parser.add_argument("--combine_ez", type=bool, default=True, help="If combine ez two conditions")
