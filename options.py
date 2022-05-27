@@ -23,7 +23,7 @@ class Configs():
                             help="root datasets directory")
         self.parser.add_argument("--k_folds", type=int,
                             default=10, help="k folds")
-        self.parser.add_argument("--save_folder", type=str, default="outputs/orig_dice",
+        self.parser.add_argument("--save_folder", type=str, default="outputs/both_orig",
                             help="Path or url of the dataset")
         self.parser.add_argument("--train_batch_size", type=int,
                             default=8, help="Batch size for training")
@@ -50,7 +50,8 @@ class Configs():
         self.parser.add_argument("--is_size", default=(256, 256), help="resize of input image, need same size as GANs generation") #(500,750)
         self.parser.add_argument("--save_inference", type=str, default='outputs_inference', help="Save inference or test images directory")
         self.parser.add_argument("--num_iteration", type=int, default=5, help="Number of iterations for refine CAM")
-        self.parser.add_argument("--labels", type=str, default=['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround'], help="['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround', 'EZ attenuated', 'EZ disrupted', 'Retinal Traction', 'Definite DRIL']")
+        self.parser.add_argument("--labels", type=str, default=['SRF', 'IRF', 'EZ', 'HRD'], help="['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround', 'EZ attenuated', 'EZ disrupted', 'Retinal Traction', 'Definite DRIL']")
+    
     def parse(self):
         args = self.parser.parse_args()
         file_name = os.path.join(args.save_folder, 'opt.txt')

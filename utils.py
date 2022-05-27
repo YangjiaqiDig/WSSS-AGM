@@ -2,6 +2,8 @@ import os
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, classification_report, roc_auc_score
 from options import Configs
+import torch
+
 type_color = {
     0: [0, 0, 0], # black
     1: [255, 0, 0], # srf red
@@ -38,8 +40,11 @@ def calculate_roc(outputs, labels):
     gt = labels.cpu().detach().numpy()
     print(gt.sum(axis = 0), predicted.sum(axis = 0), gt.shape)
     # drop background class as they are all 1 then eroor roc
-    roc_class = roc_auc_score(gt[:, :-1], predicted[:, :-1], average=None)
-    roc_avg = roc_auc_score(gt[:, :-1], predicted[:, :-1], average='weighted')
+    if OrgLabels[-1] == 'BackGround':
+        gt = gt[:, :-1]
+        predicted = predicted[:, :-1]
+    roc_class = roc_auc_score(gt, predicted, average=None)
+    roc_avg = roc_auc_score(gt, predicted, average='weighted')
     res_dict = {}
     for i in range(len(OrgLabels)):
         if i == len(OrgLabels) - 1:
@@ -76,6 +81,7 @@ def save_tensorboard(tb, loss_dict, k_folds):
             tb.add_scalar("Val Class ROC/{}".format(label_type), loss_dict['total_val_roc_matrix'][epoch_nbr][label_type] / k_folds, epoch_nbr)
 
     tb.close()
+    
 if __name__ == "__main__":
     x = np.array([[1., 1., 1., 0., 0., 1], [1., 1., 1., 0., 0., 1]])
     y = np.array([[0., 1., 1., 1., 0., 1], [0., 1., 1., 1., 0., 1]])

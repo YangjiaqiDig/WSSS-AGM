@@ -14,7 +14,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-DEVICE_NR = '2'
+DEVICE_NR = '1'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 
@@ -126,7 +126,8 @@ class Train():
             with torch.no_grad():
                 loss_val = self.loss_cam(outputs, labels)
                 loss_dice = dsc_loss(outputs, labels)
-                total_loss_val += loss_val.cpu().item()
+                combined_loss = loss_dice + loss_val
+                total_loss_val += combined_loss.cpu().item()
                 batch_accuracies_metrics = calculate_metrics(outputs, labels)
                 total_acc_val += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
@@ -160,7 +161,8 @@ class Train():
             outputs = self.cam_model(updated_image)
             loss_train = self.loss_cam(outputs, labels)
             loss_dice = dsc_loss(outputs, labels)
-            loss_train.backward()
+            combined_loss = loss_dice + loss_train
+            combined_loss.backward()
             self.cam_optimizer.step()
         
         self.cam_model.eval()
@@ -184,7 +186,8 @@ class Train():
                 outputs = self.cam_model(updated_image)
                 loss_train = self.loss_cam(outputs, labels)
                 loss_dice = dsc_loss(outputs, labels)
-                total_loss += loss_train.cpu().item()
+                combined_loss = loss_dice + loss_train
+                total_loss += combined_loss.cpu().item()
                 batch_accuracies_metrics = calculate_metrics(outputs, labels)
                 total_acc += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
