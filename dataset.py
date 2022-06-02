@@ -11,8 +11,10 @@ import os
 # pd.set_option("display.max_rows", None)
 
 class OCTDataset(Dataset): 
-    def __init__(self, args, transform, data_type):
+    def __init__(self, args, transform, data_type, infer_list=[]):
         self.file_list = {'train': glob.glob("{}/train/*".format(args.root_dirs)), 'test': glob.glob("{}/test/*".format(args.root_dirs))}
+        if data_type == 'inference':
+            self.file_list = {'inference': ["{}/test/{}".format(args.root_dirs, item) for item in infer_list]}
         self.labels_table = pd.read_csv("our_dataset/labels.csv")
         if args.combine_ez:
             self.labels_table['EZ'] = self.labels_table['EZ attenuated'] + self.labels_table['EZ disrupted']

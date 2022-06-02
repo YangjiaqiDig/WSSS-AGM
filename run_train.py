@@ -13,7 +13,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-DEVICE_NR = '0'
+DEVICE_NR = '1'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 
@@ -52,6 +52,7 @@ def dsc_loss(y_pred, y_true, varepsilon=1.e-8):
 
     return 1 - numerator / denominator
 
+
 class Train():
     def __init__(self):
         self.args = Configs().parse()
@@ -76,14 +77,21 @@ class Train():
                 self.gan_pretrained = load_gan_model(gan_pretrained_dict, self.device)
                 print(f' Loaded Pretained GAN weights from {path}.')
         self.transform_norml = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        self.w_ce = self.args.w_ce
+        self.w_dice = self.args.w_dice
         
+    def cam_loss(self, y_pred, y_true):
+        loss_ce = self.loss_cam(y_pred, y_true)
+        loss_dice = dsc_loss(y_pred, y_true)
+        return  self.w_ce * loss_ce + self.w_dice * loss_dice  
+    
     def train_parameters(self):
         shared_model = MultiTaskModel(self.backbone, self.num_input_channel)
         cam_model = CAM_Net(shared_model, self.num_class)
         seg_model = U_Net(shared_model, self.num_class)
 
         if self.args.continue_train:
-            print('Loading pretrained model from checkpoint {0}/weights/25.pwf'.format(self.args.check_point)) 
+            print('Loading pretrained model from checkpoint {0}/weights/100.pwf'.format(self.args.check_point)) 
             checkpoint = torch.load('{0}/weights/25.pwf'.format(self.args.check_point))   
             cam_model.load_state_dict(checkpoint['state_dict'])
         
@@ -123,10 +131,8 @@ class Train():
                 params = {'args': self.args, 'epoch': epoch, 'model': self.cam_model, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
                 save_cam_results(params)
             with torch.no_grad():
-                # loss_val = self.loss_cam(outputs, labels)
-                loss_dice = dsc_loss(outputs, labels)
-                # combined_loss = loss_dice + loss_val
-                total_loss_val += loss_dice.cpu().item()
+                combined_loss = self.cam_loss(outputs, labels)
+                total_loss_val += combined_loss.cpu().item()
                 batch_accuracies_metrics = calculate_metrics(outputs, labels)
                 total_acc_val += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
@@ -156,10 +162,8 @@ class Train():
                     updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, cam)
             self.cam_optimizer.zero_grad()
             outputs = self.cam_model(updated_image)
-            # loss_train = self.loss_cam(outputs, labels)
-            loss_dice = dsc_loss(outputs, labels)
-            # combined_loss = loss_dice + loss_train
-            loss_dice.backward()
+            combined_loss = self.cam_loss(outputs, labels)
+            combined_loss.backward()
             self.cam_optimizer.step()
         self.cam_lr_scheduler.step()
         
@@ -182,10 +186,8 @@ class Train():
                     updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, cam)
             with torch.no_grad():
                 outputs = self.cam_model(updated_image)
-                # loss_train = self.loss_cam(outputs, labels)
-                loss_dice = dsc_loss(outputs, labels)
-                # combined_loss = loss_dice + loss_train
-                total_loss += loss_dice.cpu().item()
+                combined_loss = self.cam_loss(outputs, labels)
+                total_loss += combined_loss.cpu().item()
                 batch_accuracies_metrics = calculate_metrics(outputs, labels)
                 total_acc += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
@@ -235,8 +237,46 @@ class Train():
         save_models(self.args, epoch, self.cam_model, self.cam_optimizer)
         print('final running time:', time.time() - start)
         
+    def inference(self, infer_list=[]):
+        # if not give infer list of image names, then default as infer all testing
+        self.continue_train = True
+        self.train_parameters()
+        infer_dataset = self.dataset_test if not len(infer_list) else OCTDataset(self.args, transform=valid_transform(self.args.is_size), data_type='inference', infer_list=infer_list)
+        dataloader = torch.utils.data.DataLoader(
+            infer_dataset,
+            num_workers=8,
+            batch_size=self.args.valid_batch_size, shuffle=False)
+        self.cam_model.eval()
+        total_acc_val = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
+        total_loss_val = 0
+        gt_list = torch.empty(0,len(OrgLabels)).to(self.device)
+        pred_list = torch.empty(0,len(OrgLabels)).to(self.device)
+        for batch, data in tqdm(enumerate(dataloader), total=len(dataloader)):
+            image, labels = data["image"].to(self.device), data["labels"].to(self.device)        
+            updated_image = image.clone()
+            if self.args.input_gan:
+                input_for_gan = self.transform_norml(updated_image)
+                gan_tensor = self.gan_pretrained.inference(input_for_gan)
+                updated_image = torch.cat((image, gan_tensor), dim=1)
+            outputs = self.cam_model(updated_image)
+            # maybe only for args.n_epochs in first condition
+            params = {'args': self.args, 'model': self.cam_model, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
+            save_cam_results(params, is_inference=True)
+            with torch.no_grad():
+                combined_loss = self.cam_loss(outputs, labels)
+                total_loss_val += combined_loss.cpu().item()
+                batch_accuracies_metrics = calculate_metrics(outputs, labels)
+                total_acc_val += Counter(batch_accuracies_metrics)
+                gt_list = torch.cat((gt_list, labels))
+                pred_list = torch.cat((pred_list, outputs))
+                
+        # Print accuracy
+        valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
+        roc_avg, roc_class = calculate_roc(pred_list, gt_list)
+        print('- Val loss:', valid_loss_epoch, '- Val ROC:', roc_avg,  "- ROC per class:", roc_class, "- Val acc:", valid_acc_epoch)
+        return valid_loss_epoch, valid_acc_epoch, roc_avg, roc_class
 
 
 if __name__ == "__main__":
     trainer = Train()
-    trainer.train()
+    trainer.inference()
