@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import cv2 as cv
 import torchvision.utils as vutils
 
+import pandas as pd
+
 def filter_noise():
     for filename in os.listdir('/ssd1/jiaqi/retinal_project/examples/ganomaly/anomaly_dme_rescale'):
         print(filename)
@@ -178,7 +180,20 @@ def remove_background():
     print(count)
     return;
 
+def random_seperate_test():
+    labels_table = pd.read_csv('our_dataset/labels.csv')
+    labels_table['EZ'] = (labels_table['EZ attenuated'] + labels_table['EZ disrupted'])
+    labels_table['patient'] = labels_table['img'].apply(lambda row: '-'.join(row.split('-')[:2])) 
+    
+    combined_df = labels_table.groupby(['patient']).agg({'SRF':'sum','IRF':'sum', 'EZ':'sum', 'HRD':'sum','RPE':'sum','Retinal Traction':'sum','Definite DRIL':'sum'}).reset_index()
+    selected = labels_table[labels_table['img'].str.contains('2388519|15307|3882196|3565572|4240465|224974|3491563|1072015|DR91|DR69|DR10.jpeg')]
+    selected = selected.append(selected.sum(numeric_only=True), ignore_index=True)
+    print(selected)
+    combined_df = combined_df.sort_values(by=[ 'Definite DRIL'], ascending=False)
+    print(combined_df.iloc[:30])
+#3882196|3565572|4240465|224974|2205167|3491563|DR91|DR10
 if __name__ == "__main__":
     # overlap()
     # filter_noise()
-    remove_background()
+    # remove_background()
+    random_seperate_test()

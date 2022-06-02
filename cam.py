@@ -17,11 +17,11 @@ import torchvision.utils as vutils
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 def save_cam_during_train(params, cam):
-    args, epoch, fold, inputs, batch_preds, updated_image = params['args'], params['epoch'], params['fold'], params['inputs'], params['batch_preds'], params['refined']
+    args, epoch, inputs, batch_preds, updated_image = params['args'], params['epoch'], params['inputs'], params['batch_preds'], params['refined']
     for i, pred in enumerate(batch_preds):
         rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
         img_path = inputs["path"][i].split('/')[-1]
-        save_path = os.path.join(args.save_folder, f'fold-{fold}', 'iteration', '{}'.format(img_path.split('.')[0]))
+        save_path = os.path.join(args.save_folder, 'iteration', '{}'.format(img_path.split('.')[0]))
         if not os.path.exists(save_path):
             os.makedirs(save_path)   
         # truth_label = '{0}_{1}'.format(inputs["labels"][i][0], inputs["labels"][i][1])

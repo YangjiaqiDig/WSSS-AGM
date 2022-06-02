@@ -9,12 +9,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import transforms
 import torchvision.models as models
-from sklearn.model_selection import KFold
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-DEVICE_NR = '1'
+DEVICE_NR = '0'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 
@@ -62,11 +61,12 @@ class Train():
             print("Number of GPUs: ", torch.cuda.device_count(), "Device Nbr: ", DEVICE_NR)
             
         torch.manual_seed(42)
-        self.kfold = KFold(n_splits=self.args.k_folds, shuffle=False)
-        self.dataset = OCTDataset(self.args, transform_train=train_transform(self.args.is_size), transform_val=valid_transform(self.args.is_size))
+        self.dataset_train = OCTDataset(self.args, transform=train_transform(self.args.is_size), data_type='train')
+        self.dataset_test = OCTDataset(self.args, transform=valid_transform(self.args.is_size), data_type='test')
+
         self.backbone = network_class(self.args)
         self.num_class = len(OrgLabels)
-        self.num_input_channel = self.dataset[0]['image'].shape[0] * 2 if self.args.input_gan else self.dataset[0]['image'].shape[0]
+        self.num_input_channel = self.dataset_train[0]['image'].shape[0] * 2 if self.args.input_gan else self.dataset_train[0]['image'].shape[0]
         self.num_of_epochs = self.args.num_iteration if self.args.continue_train else self.args.n_epochs
         self.gan_pretrained = False
         if self.args.input_gan:
@@ -77,14 +77,14 @@ class Train():
                 print(f' Loaded Pretained GAN weights from {path}.')
         self.transform_norml = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         
-    def train_parameters(self, fold):
+    def train_parameters(self):
         shared_model = MultiTaskModel(self.backbone, self.num_input_channel)
         cam_model = CAM_Net(shared_model, self.num_class)
         seg_model = U_Net(shared_model, self.num_class)
 
         if self.args.continue_train:
-            print('Loading pretrained model from checkpoint {0}/fold-{1}/weights/25.pwf'.format(self.args.check_point, fold)) 
-            checkpoint = torch.load('{0}/fold-{1}/weights/25.pwf'.format(self.args.check_point, fold))   
+            print('Loading pretrained model from checkpoint {0}/weights/25.pwf'.format(self.args.check_point)) 
+            checkpoint = torch.load('{0}/weights/25.pwf'.format(self.args.check_point))   
             cam_model.load_state_dict(checkpoint['state_dict'])
         
         self.cam_model = cam_model.cuda() if self.device == "cuda" else cam_model
@@ -92,21 +92,20 @@ class Train():
         
         self.cam_optimizer = optim.SGD(cam_model.parameters(), lr=self.args.lr, momentum=0.9)
         self.seg_optimizer = optim.Adam(seg_model.parameters(), lr=self.args.lr)
-        
+
+        self.cam_lr_scheduler = torch.optim.lr_scheduler.StepLR(self.cam_optimizer, step_size=25, gamma=0.5)
         self.loss_cam = nn.BCELoss()#nn.BCEWithLogitsLoss()#
         self.loss_seg = nn.CrossEntropyLoss()        
         
-    def valid_once(self, epoch, fold):
+    def valid_once(self, epoch):
         self.cam_model.eval()
-        # Evaluationfor this fold
         total_acc_val = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
         total_loss_val = 0
         target_layers = [self.cam_model.multi_task_model.base_model[-1][-1]]
         cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=target_layers)
-        self.testloader.dataset.set_use_train_transform(False)
         gt_list = torch.empty(0,len(OrgLabels)).to(self.device)
         pred_list = torch.empty(0,len(OrgLabels)).to(self.device)
-        for batch, data in tqdm(enumerate(self.testloader), total=int(len(self.test_subsampler) / self.testloader.batch_size)):
+        for batch, data in tqdm(enumerate(self.testloader), total=len(self.testloader)):
             image, labels = data["image"].to(self.device), data["labels"].to(self.device)        
             updated_image = image.clone()
             if self.args.input_gan:
@@ -121,13 +120,13 @@ class Train():
             outputs = self.cam_model(updated_image)
             # maybe only for args.n_epochs in first condition
             if (epoch + 1) % 5 == 0 or self.args.continue_train or (epoch + 1) > self.args.refine_epoch_point: 
-                params = {'args': self.args, 'epoch': epoch, 'model': self.cam_model, 'fold': fold, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
+                params = {'args': self.args, 'epoch': epoch, 'model': self.cam_model, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
                 save_cam_results(params)
             with torch.no_grad():
-                loss_val = self.loss_cam(outputs, labels)
+                # loss_val = self.loss_cam(outputs, labels)
                 loss_dice = dsc_loss(outputs, labels)
-                combined_loss = loss_dice + loss_val
-                total_loss_val += combined_loss.cpu().item()
+                # combined_loss = loss_dice + loss_val
+                total_loss_val += loss_dice.cpu().item()
                 batch_accuracies_metrics = calculate_metrics(outputs, labels)
                 total_acc_val += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
@@ -136,7 +135,6 @@ class Train():
         # Print accuracy
         valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
         roc_avg, roc_class = calculate_roc(pred_list, gt_list)
-        # print(f'K-FOLD CROSS VALIDATION RESULTS FOR {fold} FOLDS')
         print('- Val loss:', valid_loss_epoch, '- Val ROC:', roc_avg,  "- ROC per class:", roc_class, "- Val acc:", valid_acc_epoch)
         return valid_loss_epoch, valid_acc_epoch, roc_avg, roc_class
 
@@ -144,8 +142,7 @@ class Train():
         self.cam_model.train()
         target_layers = [self.cam_model.multi_task_model.base_model[-1][-1]]
         cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=target_layers)
-        self.trainloader.dataset.set_use_train_transform(True)
-        for batch, data in tqdm(enumerate(self.trainloader), total = int(len(self.train_subsampler)/self.trainloader.batch_size)):
+        for batch, data in tqdm(enumerate(self.trainloader), total=len(self.trainloader)):
             image, labels = data["image"].to(self.device), data["labels"].to(self.device)
             updated_image = image.clone()
             if self.args.input_gan:
@@ -159,11 +156,12 @@ class Train():
                     updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, cam)
             self.cam_optimizer.zero_grad()
             outputs = self.cam_model(updated_image)
-            loss_train = self.loss_cam(outputs, labels)
+            # loss_train = self.loss_cam(outputs, labels)
             loss_dice = dsc_loss(outputs, labels)
-            combined_loss = loss_dice + loss_train
-            combined_loss.backward()
+            # combined_loss = loss_dice + loss_train
+            loss_dice.backward()
             self.cam_optimizer.step()
+        self.cam_lr_scheduler.step()
         
         self.cam_model.eval()
         total_acc = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
@@ -184,10 +182,10 @@ class Train():
                     updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, cam)
             with torch.no_grad():
                 outputs = self.cam_model(updated_image)
-                loss_train = self.loss_cam(outputs, labels)
+                # loss_train = self.loss_cam(outputs, labels)
                 loss_dice = dsc_loss(outputs, labels)
-                combined_loss = loss_dice + loss_train
-                total_loss += combined_loss.cpu().item()
+                # combined_loss = loss_dice + loss_train
+                total_loss += loss_dice.cpu().item()
                 batch_accuracies_metrics = calculate_metrics(outputs, labels)
                 total_acc += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
@@ -200,51 +198,41 @@ class Train():
 
     def train(self):
         start = time.time()
-        # K-fold Cross Validation model evaluation
-        total_train_loss, total_val_loss, total_train_acc_matrix, total_val_acc_matrix = {}, {}, {}, {}
-        total_val_roc_matrix, total_val_roc, total_train_roc_matrix, total_train_roc = {}, {}, {}, {}
-        for fold, (train_ids, test_ids) in enumerate(self.kfold.split(self.dataset)):
-            logging.info(f'---------FOLD {fold}--------')
-            self.train_parameters(fold)
-            # # Sample elements randomly from a given list of ids, no replacement.
-            self.train_subsampler = torch.utils.data.SubsetRandomSampler(train_ids)
-            self.test_subsampler = torch.utils.data.SubsetRandomSampler(test_ids)
-            # Define data loaders for training and testing data in this fold
-            self.trainloader = torch.utils.data.DataLoader(
-                            self.dataset, 
-                            num_workers=8,
-                            batch_size=self.args.train_batch_size, sampler=self.train_subsampler)
-            self.testloader = torch.utils.data.DataLoader(
-                            self.dataset,
-                            num_workers=8,
-                            batch_size=self.args.valid_batch_size, sampler=self.test_subsampler, shuffle=False)
-            for epoch in range(0, self.num_of_epochs):
-                train_loss, train_acc_matrix, train_roc_avg, train_roc_class = self.train_once(epoch)
-                mark_epoch = epoch + 25 if self.args.continue_train else epoch
-                
-                total_train_loss[mark_epoch] = total_train_loss[mark_epoch] + train_loss if mark_epoch in total_train_loss else 0
-                total_train_acc_matrix[mark_epoch] =  {k: v + total_train_acc_matrix[mark_epoch][k] for k, v in train_acc_matrix.items()} if mark_epoch in total_train_acc_matrix else train_acc_matrix
-                total_train_roc[mark_epoch] = total_train_roc[mark_epoch] + train_roc_avg if mark_epoch in total_train_roc else 0
-                total_train_roc_matrix[mark_epoch] =  {k: v + total_train_roc_matrix[mark_epoch][k] for k, v in train_roc_class.items()} if mark_epoch in total_train_roc_matrix else train_roc_class
-                
-                if (epoch + 1) % 5 == 0 or self.args.continue_train or (epoch + 1) > self.args.refine_epoch_point:
-                    valid_loss, valid_acc_matrxi, roc_avg, roc_class = self.valid_once(epoch, fold)
-                    total_val_loss[mark_epoch] = total_val_loss[mark_epoch] + valid_loss if mark_epoch in total_val_loss else 0
-                    total_val_acc_matrix[mark_epoch] =  {k: v + total_val_acc_matrix[mark_epoch][k] for k, v in valid_acc_matrxi.items()} if mark_epoch in total_val_acc_matrix else valid_acc_matrxi
-                    total_val_roc[mark_epoch] = total_val_roc[mark_epoch] + roc_avg if mark_epoch in total_val_roc else 0
-                    total_val_roc_matrix[mark_epoch] =  {k: v + total_val_roc_matrix[mark_epoch][k] for k, v in roc_class.items()} if mark_epoch in total_val_roc_matrix else roc_class
-                
-            ## Save model for last epoch
-            save_models(self.args, fold, epoch, self.cam_model, self.cam_optimizer)
-        loss_dict = {'total_train_loss': total_train_loss, 
-                     'total_train_acc_matrix': total_train_acc_matrix, 
-                     'total_train_roc': total_train_roc, 
-                     'total_train_roc_matrix': total_train_roc_matrix,
-                     'total_val_loss:': total_val_loss, 
-                     'total_val_acc_matrix': total_val_acc_matrix, 
-                     'total_val_roc': total_val_roc,
-                     'total_val_roc_matrix': total_val_roc_matrix}
-        save_tensorboard(self.tb, loss_dict, self.args.k_folds)
+        
+        self.train_parameters()
+        # Define data loaders for training and testing data
+        self.trainloader = torch.utils.data.DataLoader(
+                        self.dataset_train, 
+                        num_workers=8,
+                        batch_size=self.args.train_batch_size, shuffle=True)
+        self.testloader = torch.utils.data.DataLoader(
+                        self.dataset_test,
+                        num_workers=8,
+                        batch_size=self.args.valid_batch_size, shuffle=False)
+        for epoch in range(0, self.num_of_epochs):
+            train_loss, train_acc_matrix, train_roc_avg, train_roc_class = self.train_once(epoch)
+            
+            mark_epoch = epoch + 25 if self.args.continue_train else epoch
+            include_valid = False
+            valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class = None, None, None, None
+            if (epoch + 1) % 10 == 0 or self.args.continue_train or (epoch + 1) > self.args.refine_epoch_point:
+                valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class = self.valid_once(epoch)
+                include_valid = True
+            
+            loss_dict = {
+                'total_train_loss': train_loss, 
+                'total_val_loss': valid_loss, 
+                'total_train_acc_matrix': train_acc_matrix, 
+                'total_train_roc': train_roc_avg, 
+                'total_train_roc_matrix': train_roc_class,
+                'total_val_acc_matrix': valid_acc_matrxi, 
+                'total_val_roc': valid_roc_avg,
+                'total_val_roc_matrix': valid_roc_class
+            }
+            save_tensorboard(self.tb, loss_dict, mark_epoch, include_valid)
+            
+        ## Save model for last epoch
+        save_models(self.args, epoch, self.cam_model, self.cam_optimizer)
         print('final running time:', time.time() - start)
         
 

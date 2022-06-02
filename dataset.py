@@ -11,46 +11,44 @@ import os
 # pd.set_option("display.max_rows", None)
 
 class OCTDataset(Dataset): 
-    def __init__(self, args, transform_train=None, transform_val=None):
-        self.file_list = []
-        subfolders = os.listdir(args.root_dirs)
-        for sub_dir in subfolders:
-            self.file_list += glob.glob("{}/{}/*".format(args.root_dirs, sub_dir))
+    def __init__(self, args, transform, data_type):
+        self.file_list = {'train': glob.glob("{}/train/*".format(args.root_dirs)), 'test': glob.glob("{}/test/*".format(args.root_dirs))}
         self.labels_table = pd.read_csv("our_dataset/labels.csv")
         if args.combine_ez:
             self.labels_table['EZ'] = self.labels_table['EZ attenuated'] + self.labels_table['EZ disrupted']
             self.labels_table.loc[self.labels_table['EZ'] > 1, 'EZ'] = 1
         if OrgLabels[-1] == 'BackGround':
             self.labels_table['BackGround'] = 1
-        self.transform_train = transform_train
-        self.transform_val = transform_val
+        self.transform = transform
         self.roots = args.root_dirs
         self.input_structure = args.input_structure
-        self.use_train = False
-    def set_use_train_transform(self, use_train=False):
-        self.use_train = use_train
+        self.data_type = data_type
+
     def __getitem__(self, idx):
-        data_path = sorted(self.file_list)[idx]
+        data_path = sorted(self.file_list[self.data_type])[idx]
         image = Image.open(data_path)
         image_arr = np.asarray(image) 
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
         image_name = data_path.split('/')[-1]
-        labels = self.labels_table.loc[self.labels_table['img'] == image_name]
-        if self.use_train:
-            image_tensor = self.transform_train(image_arr)
-        else: image_tensor = self.transform_val(image_arr)
-        if self.input_structure:
-            # not re-generate structure for background removal
-            str_image_gan = Image.open('our_dataset/structures/gan/{}'.format(image_name))
-            str_image_orig = Image.open('our_dataset/structures/original/{}'.format(image_name))
-            str_tensor_gan, str_tensor_orig = self.transform_val(np.asarray(str_image_gan)), self.transform_val(np.asarray(str_image_orig))
-            image_tensor = torch.cat((image_tensor, str_tensor_orig, str_tensor_gan))
+        image_tensor = self.transform(image_arr)
+        if image_name in self.labels_table['img'].values:
+            labels = self.labels_table.loc[self.labels_table['img'] == image_name]
+        else:
+            normal_label = {'SRF': 0, 'IRF': 0, 'EZ attenuated': 0,  'EZ disrupted': 0,  'HRD': 0,  'RPE': 0,  'Retinal Traction': 0,  'Definite DRIL': 0,  'Questionable DRIL': 0,  'EZ': 0,  'BackGround': 1}
+            return {'image': image_tensor, 'labels': torch.FloatTensor([normal_label[x] for x in OrgLabels]), 'path': data_path}
+        
+        # if self.input_structure:
+        #     # not re-generate structure for background removal
+        #     str_image_gan = Image.open('our_dataset/structures/gan/{}'.format(image_name))
+        #     str_image_orig = Image.open('our_dataset/structures/original/{}'.format(image_name))
+        #     str_tensor_gan, str_tensor_orig = self.transform_val(np.asarray(str_image_gan)), self.transform_val(np.asarray(str_image_orig))
+        #     image_tensor = torch.cat((image_tensor, str_tensor_orig, str_tensor_gan))
         try:
             return {'image': image_tensor, 'labels': torch.FloatTensor([labels[x].to_numpy()[0] for x in OrgLabels]), 'path': data_path}
         except: print("???", data_path, image_tensor.shape, labels)
     def __len__(self):
-        return len(self.file_list)
+        return len(self.file_list[self.data_type])
         
 def train_transform(is_size):
     transform_seq = transforms.Compose([
