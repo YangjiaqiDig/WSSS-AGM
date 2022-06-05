@@ -36,7 +36,7 @@ def calculate_metrics(outputs, labels):
 
 def calculate_roc(outputs, labels):
     # [batch, class]
-    predicted = np.round(outputs.cpu().detach().numpy())
+    predicted = outputs.cpu().detach().numpy()
     gt = labels.cpu().detach().numpy()
     print(gt.sum(axis = 0), predicted.sum(axis = 0), gt.shape)
     # drop background class as they are all 1 then eroor roc
