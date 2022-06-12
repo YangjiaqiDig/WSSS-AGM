@@ -13,7 +13,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-DEVICE_NR = '1'
+DEVICE_NR = '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 
@@ -91,8 +91,8 @@ class Train():
         seg_model = U_Net(shared_model, self.num_class)
 
         if self.args.continue_train:
-            print('Loading pretrained model from checkpoint {0}/weights/100.pwf'.format(self.args.check_point)) 
-            checkpoint = torch.load('{0}/weights/25.pwf'.format(self.args.check_point))   
+            print('Loading pretrained model from checkpoint {0}/weights/best.pwf'.format(self.args.check_point)) 
+            checkpoint = torch.load('{0}/weights/best.pwf'.format(self.args.check_point))   
             cam_model.load_state_dict(checkpoint['state_dict'])
         
         self.cam_model = cam_model.cuda() if self.device == "cuda" else cam_model
@@ -101,7 +101,7 @@ class Train():
         self.cam_optimizer = optim.SGD(cam_model.parameters(), lr=self.args.lr, momentum=0.9)
         self.seg_optimizer = optim.Adam(seg_model.parameters(), lr=self.args.lr)
 
-        self.cam_lr_scheduler = torch.optim.lr_scheduler.StepLR(self.cam_optimizer, step_size=25, gamma=0.5)
+        self.cam_lr_scheduler = torch.optim.lr_scheduler.StepLR(self.cam_optimizer, step_size=self.args.lr_schedule['step'], gamma=self.args.lr_schedule['gamma'])
         self.loss_cam = nn.BCELoss()#nn.BCEWithLogitsLoss()#
         self.loss_seg = nn.CrossEntropyLoss()        
         
@@ -162,6 +162,13 @@ class Train():
                     updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, cam)
             self.cam_optimizer.zero_grad()
             outputs = self.cam_model(updated_image)
+            if self.args.segmentation < epoch + 1:
+                pseudo_label = get_pseudo_label() # (batch, w, h)
+                seg_outputs = self.seg_model(updated_image) #(batch, nb_class, w, h)
+                segmentation_loss = self.loss_seg(seg_outputs, pseudo_label.to(self.device))
+                segmentation_loss.backward()
+                self.seg_optimizer.setp()
+            
             combined_loss = self.cam_loss(outputs, labels)
             combined_loss.backward()
             self.cam_optimizer.step()
@@ -211,6 +218,7 @@ class Train():
                         self.dataset_test,
                         num_workers=8,
                         batch_size=self.args.valid_batch_size, shuffle=False)
+        best_roc = 0
         for epoch in range(0, self.num_of_epochs):
             train_loss, train_acc_matrix, train_roc_avg, train_roc_class = self.train_once(epoch)
             
@@ -220,7 +228,8 @@ class Train():
             if (epoch + 1) % 10 == 0 or self.args.continue_train or (epoch + 1) > self.args.refine_epoch_point:
                 valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class = self.valid_once(epoch)
                 include_valid = True
-            
+                if valid_roc_avg >= best_roc:
+                    save_models(self.args, epoch, self.cam_model, self.cam_optimizer, is_best=True)
             loss_dict = {
                 'total_train_loss': train_loss, 
                 'total_val_loss': valid_loss, 
@@ -239,7 +248,7 @@ class Train():
         
     def inference(self, infer_list=[]):
         # if not give infer list of image names, then default as infer all testing
-        self.continue_train = True
+        self.args.continue_train = True
         self.train_parameters()
         infer_dataset = self.dataset_test if not len(infer_list) else OCTDataset(self.args, transform=valid_transform(self.args.is_size), data_type='inference', infer_list=infer_list)
         dataloader = torch.utils.data.DataLoader(
@@ -269,14 +278,18 @@ class Train():
                 total_acc_val += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
                 pred_list = torch.cat((pred_list, outputs))
-                
+                # import pdb; pdb.set_trace()
         # Print accuracy
-        valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
-        roc_avg, roc_class = calculate_roc(pred_list, gt_list)
-        print('- Val loss:', valid_loss_epoch, '- Val ROC:', roc_avg,  "- ROC per class:", roc_class, "- Val acc:", valid_acc_epoch)
-        return valid_loss_epoch, valid_acc_epoch, roc_avg, roc_class
+        # valid_acc_epoch, valid_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_loss_val / (batch + 1)
+        # roc_avg, roc_class = calculate_roc(pred_list, gt_list)
+        # print('- Val loss:', valid_loss_epoch, '- Val ROC:', roc_avg,  "- ROC per class:", roc_class, "- Val acc:", valid_acc_epoch)
+        # return valid_loss_epoch, valid_acc_epoch, roc_avg, roc_class
 
 
 if __name__ == "__main__":
     trainer = Train()
-    trainer.inference()
+    # trainer.train()
+    trainer.inference(infer_list=['DME-15307-1.jpeg',
+                                  'DME-4240465-41.jpeg', 
+                                  'DR10.jpeg',
+                                  'NORMAL-15307-1.jpeg'])

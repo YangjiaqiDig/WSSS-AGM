@@ -19,6 +19,7 @@ import torchvision.utils as vutils
 def save_cam_during_train(params, cam):
     args, epoch, inputs, batch_preds, updated_image = params['args'], params['epoch'], params['inputs'], params['batch_preds'], params['refined']
     for i, pred in enumerate(batch_preds):
+        orig_image = inputs["image"][i][0].clone()
         rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
         img_path = inputs["path"][i].split('/')[-1]
         save_path = os.path.join(args.save_folder, 'iteration', '{}'.format(img_path.split('.')[0]))
@@ -44,13 +45,16 @@ def save_cam_during_train(params, cam):
             # input_tensor  = inputs["image"].to(args.device)
             grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=True)
             grayscale_cam = grayscale_cam[0, :]
-
             grey_thred = grayscale_cam.copy()
-            # test = grey_thred * rgb_img[...,0]
-            # cv2.imwrite(save_path + '/test{}.jpg'.format(cls), (test * 255).astype(np.uint8))
-            grey_thred[grey_thred < 0.8] = 0
-            if OrgLabels[-1] == 'BackGround' and cls != (len(OrgLabels)-1): # dont illustrate the background
-                all_grey[cls + 1] = grey_thred
+            grey_thred[grey_thred < 0.3] = 0
+            
+            strict_grey = grey_thred.copy()
+            if OrgLabels[cls] in ['IRF', 'SRF']:
+                strict_grey[orig_image > 0.2] = 0 #keep bubble region (dark)
+            else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
+                     
+            if OrgLabels[cls] != 'BackGround': # dont illustrate the background
+                all_grey[cls + 1] = strict_grey
             visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
             cam_image = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
             save_cam_in_row.append(cam_image)
@@ -58,11 +62,13 @@ def save_cam_during_train(params, cam):
         
         labels = np.argmax(np.array(all_grey), axis=0)
         color_mask = np.zeros((w, h, 3))
-        for i in range(1, len(OrgLabels) + 1):
-            mask = labels == i
-            color_mask[:,:,][mask] = type_color[i]
-        color_mask = cv2.cvtColor(color_mask.astype(np.uint8), cv2.COLOR_BGR2RGB)
-        save_cam_in_row.append(color_mask)
+        # there is no leision, so no need show black image
+        if labels.max() != 0:
+            for i in range(1, len(OrgLabels) + 1):
+                mask = labels == i
+                color_mask[:,:,][mask] = type_color[i]
+            color_mask = cv2.cvtColor(color_mask.astype(np.uint8), cv2.COLOR_BGR2RGB)
+            save_cam_in_row.append(color_mask)
         dst = cv2.addWeighted((rgb_img * 255).astype(np.uint8), 1, color_mask.astype(np.uint8), 0.7, 0)
         save_cam_in_row.append(dst)
         
@@ -76,49 +82,47 @@ def save_cam_during_train(params, cam):
 
 def save_cam_for_inference(params, cam):
     args, inputs, batch_preds, updated_image = params['args'], params['inputs'], params['batch_preds'], params['refined']
-    print(batch_preds)
+    is_background_include = 'BackGround'in OrgLabels
     # softmax = nn.Softmax()
     for i, pred in enumerate(batch_preds):
+        orig_image = inputs["image"][i][0].clone()
         rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
         img_path = inputs["path"][i].split('/')[-1]
         save_path = os.path.join(args.save_inference, '{}'.format(img_path.split('.')[0]))
         if not os.path.exists(save_path):
             os.makedirs(save_path)   
         true_classes = [i for i,v in enumerate(inputs["labels"][i]) if v > 0.5]
+        
         truth_label = [OrgLabels[cls] for cls in true_classes]
         truth_label = '_'.join(truth_label)
         w, h = inputs["image"][i].shape[-2], inputs["image"][i].shape[-1]
-        save_img = inputs["image"][i].reshape(-1,3,w, h)
-        vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True)
+        save_img = updated_image[i].reshape(-1,3,w, h)
+        vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True)
 
         pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
-        print(pred_classes)
+        if is_background_include and len(pred_classes)==1 and OrgLabels.index('BackGround') == true_classes[0]:
+            continue
         save_cam_in_row = []
         save_class_name = ''
         
         all_grey = [np.zeros((w, h))] * (len(OrgLabels) + 1)
-        if 'BackGround' in OrgLabels:
-            idx_bg = len(OrgLabels) - 1
-            targets = [ClassifierOutputTarget(idx_bg)]
-            input_tensor  = inputs["image"].to(args.device)
-            grayscale_cam = cam(input_tensor=input_tensor,targets=targets,eigen_smooth=False, aug_smooth=True)
-            grayscale_cam_bg = grayscale_cam[0, :]
-            grayscale_cam_bg[grayscale_cam_bg < 0.2] = 0
-            
         for cls in pred_classes:
             targets = [ClassifierOutputTarget(cls)]
-            input_tensor  = inputs["image"].to(args.device)
-            grayscale_cam = cam(input_tensor=input_tensor,targets=targets,eigen_smooth=False, aug_smooth=True)
+            grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=True)
             grayscale_cam = grayscale_cam[0, :]
-            
-            # remove the heat out of background prediction
-            grayscale_cam[grayscale_cam_bg==0] = 0
-
             grey_thred = grayscale_cam.copy()
-            grey_thred[grey_thred < 0.8] = 0
+            grey_thred[grey_thred < 0.3] = 0
             
-            if OrgLabels[-1] == 'BackGround' and cls != (len(OrgLabels)-1):
-                all_grey[cls + 1] = grey_thred
+            strict_grey = grey_thred.copy()
+            if OrgLabels[cls] in ['IRF', 'SRF']:
+                strict_grey[orig_image > 0.2] = 0 #keep bubble region (dark)
+                # strict_grey = strict_grey * (1 - orig_image).cpu().numpy()
+            else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
+            # strict_grey[strict_grey < 0.7] = 0
+            
+            # cv2.imwrite('test{0}.jpg'.format(cls), strict_grey * 255)
+            if OrgLabels[cls] != 'BackGround':
+                all_grey[cls + 1] = strict_grey
             visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
             cam_image = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
             save_cam_in_row.append(cam_image)
@@ -220,10 +224,11 @@ def refine_input_by_background_cam(args, model, image, cam, aug_smooth=True):
 
 def get_pseudo_label(params, cam):
     inputs, batch_preds, updated_image = params['inputs'], params['batch_preds'], params['refined']
+    pseudo_labels = []
     for i, pred in enumerate(batch_preds):
+        orig_image = inputs["image"][i][0].clone()
         w, h = inputs["image"][i].shape[-2], inputs["image"][i].shape[-1]
         pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
-        save_cam_in_row = []        
         all_grey = [np.zeros((w, h))] * (len(OrgLabels) + 1)
         for cls in pred_classes:
             targets = [ClassifierOutputTarget(cls)]
@@ -231,17 +236,18 @@ def get_pseudo_label(params, cam):
             grayscale_cam = grayscale_cam[0, :]
 
             grey_thred = grayscale_cam.copy()
-            grey_thred[grey_thred < 0.8] = 0
-            if OrgLabels[-1] == 'BackGround' and cls != (len(OrgLabels)-1): # dont illustrate the background
-                all_grey[cls + 1] = grey_thred
-            save_class_name =  save_class_name + '_' + OrgLabels[cls]
+            grey_thred[grey_thred < 0.3] = 0
+            
+            strict_grey = grey_thred.copy()
+            if OrgLabels[cls] in ['IRF', 'SRF']:
+                strict_grey[orig_image > 0.2] = 0 #keep bubble region (dark)
+            else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
+            if OrgLabels[cls] != 'BackGround': # dont illustrate the background
+                all_grey[cls + 1] = strict_grey
         
-        labels = np.argmax(np.array(all_grey), axis=0)
-        color_mask = np.zeros((w, h, 3))
-        for i in range(1, len(OrgLabels) + 1):
-            mask = labels == i
-            color_mask[:,:,][mask] = type_color[i]
-        
+        labels = np.argmax(np.array(all_grey), axis=0) # (256, 256) with 0-6 labels
+        pseudo_labels.append(labels)
+    return torch.Tensor(pseudo_labels)
     
 
 if __name__ == "__main__":

@@ -1,10 +1,11 @@
 import shutil
 import os, glob
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageEnhance
 import numpy as np
 import matplotlib.pyplot as plt
 # from medpy.filter.smoothing import anisotropic_diffusion
 import cv2 as cv
+
 import torchvision.utils as vutils
 
 import pandas as pd
@@ -132,6 +133,22 @@ def conencted_component_removal():
         img[(dilatation == 255 ) ] = 0 
         cv.imwrite('background_rm/{}'.format(img_name), img)
     return
+
+def background_mask(image):
+    gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    mask = np.zeros(image.shape, np.uint8)
+
+    ret, gray = cv.threshold(gray, 60,255, cv.THRESH_BINARY)
+    img_median = cv.medianBlur(gray, 5)
+
+    closing_kernel = np.ones((15,15),np.uint8)
+    closing = cv.morphologyEx(img_median, cv.MORPH_CLOSE, closing_kernel, iterations=1)
+
+    contours, _ = cv.findContours(closing.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    largest_area = sorted(contours, key=cv.contourArea)[-1:]
+    cv.drawContours(mask, largest_area, 0, (255,255,255), cv.FILLED)
+
+    return mask[:,:,0]
 
 def remove_background():
     imgs_dirs = glob.glob("our_dataset/dataset_DME/4/images/*")#

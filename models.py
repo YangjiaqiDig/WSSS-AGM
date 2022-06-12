@@ -109,7 +109,7 @@ if __name__ == "__main__":
     
     seg_model = U_Net(shared_model, 5)
     seg_output = seg_model(input_x)
-    print(seg_model)
+    print(seg_output.shape)
     
     
      # A full forward pass

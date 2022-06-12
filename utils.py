@@ -38,7 +38,7 @@ def calculate_roc(outputs, labels):
     # [batch, class]
     predicted = outputs.cpu().detach().numpy()
     gt = labels.cpu().detach().numpy()
-    print(gt.sum(axis = 0), predicted.sum(axis = 0), gt.shape)
+    print(gt.sum(axis = 0), np.round(predicted).sum(axis = 0), gt.shape)
     # drop background class as they are all 1 then eroor roc
     if OrgLabels[-1] == 'BackGround':
         gt = gt[:, :-1]
@@ -53,8 +53,9 @@ def calculate_roc(outputs, labels):
             res_dict[OrgLabels[i]] = roc_class[i]
     return roc_avg, res_dict
 
-def save_models(args, epoch, cam_model, cam_optimizer):
+def save_models(args, epoch, cam_model, cam_optimizer, is_best=False):
     save_path = f'./{args.save_folder}/weights'
+    save_name = 'best' if is_best else epoch + 1
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     torch.save({
@@ -62,7 +63,7 @@ def save_models(args, epoch, cam_model, cam_optimizer):
         'args': args,
         'state_dict': cam_model.state_dict(),
         'optimizer': cam_optimizer.state_dict(),
-    }, save_path + "/{0}.pwf".format(epoch + 1)) 
+    }, save_path + "/{0}.pwf".format(save_name)) 
 
 def save_tensorboard(tb, loss_dict, mark_epoch, include_valid):
     tb.add_scalar('Loss/Train', loss_dict['total_train_loss'], mark_epoch+1)
