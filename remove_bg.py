@@ -1,6 +1,6 @@
 import glob, os
 import numpy as np
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 from torch.utils.data import Dataset
 import torch
 import torch.nn as nn
@@ -11,7 +11,7 @@ from tqdm import tqdm
 import cv2
 
 from unet import U_Net
-DEVICE_NR = '1'
+DEVICE_NR = '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 
 
@@ -40,6 +40,7 @@ class OUR_DATASET(Dataset):
         normalized_image[normalized_image > 250] = 0
         normalized_image = Image.fromarray(normalized_image)
         # image = Image.open(data_path)
+        normalized_image = normalized_image.filter(ImageFilter.MinFilter(3))
         normalized_image = ImageEnhance.Contrast(normalized_image).enhance(2)
         normalized_image = np.array(normalized_image) 
         
@@ -55,7 +56,7 @@ class OUR_DATASET(Dataset):
         return len(self.file_list[self.data_type])
     
 def save_models(epoch, model, optimizer):
-    save_path = f'outputs_background/weights3'
+    save_path = f'outputs_background/weights4'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     torch.save({
@@ -78,7 +79,7 @@ model = U_Net()
 model.cuda()
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=0.01, weight_decay=1e-5)
-num_epochs = 200
+num_epochs = 1200
 lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.1)
 
 for epoch in range(num_epochs):
@@ -97,7 +98,7 @@ for epoch in range(num_epochs):
     lr_scheduler.step()
     print('epoch [{}/{}], loss:{:.4f}'.format(epoch + 1, num_epochs, sum(total_loss) / len(total_loss)))
     
-    if (epoch +1) % 20 == 0:
+    if (epoch +1) % 100 == 0:
         model.eval()
         for batch, data in tqdm(enumerate(testloader), total=len(testloader)):
             img, labels, path = data['image'], data['labels'].long(), data['path'][0]
@@ -106,13 +107,13 @@ for epoch in range(num_epochs):
                 loss = criterion(output, labels.to('cuda'))
                 val_total_loss.append(loss.data.item())
                 img_path = '{}'.format(path.split('/')[-1].split('.')[0])
-                save_path = os.path.join('outputs_background/images3', img_path)
+                save_path = os.path.join('outputs_background/images4', img_path)
                 if not os.path.exists(save_path):
                     os.makedirs(save_path)
                 save_image = torch.cat((img[:,0], output[:,1].cpu(), labels), 0)
-                # vutils.save_image(save_image.unsqueeze(1), save_path + '/{}.jpg'.format(epoch + 1), normalize=True, scale_each=True)
+                vutils.save_image(save_image.unsqueeze(1), save_path + '/{}.jpg'.format(epoch + 1), normalize=True, scale_each=True)
            
-        # save_models(epoch, model, optimizer)   
+        save_models(epoch, model, optimizer)   
         print('epoch [{}/{}], loss:{:.4f}'.format(epoch + 1, num_epochs, sum(val_total_loss) / len(val_total_loss)))
          
        

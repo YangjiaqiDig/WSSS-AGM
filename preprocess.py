@@ -138,17 +138,43 @@ def background_mask(image):
     gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
     mask = np.zeros(image.shape, np.uint8)
 
-    ret, gray = cv.threshold(gray, 60,255, cv.THRESH_BINARY)
     img_median = cv.medianBlur(gray, 5)
+    ret, gray = cv.threshold(img_median, 60,255, cv.THRESH_BINARY)
 
     closing_kernel = np.ones((15,15),np.uint8)
-    closing = cv.morphologyEx(img_median, cv.MORPH_CLOSE, closing_kernel, iterations=1)
+    closing = cv.morphologyEx(gray, cv.MORPH_CLOSE, closing_kernel, iterations=1)
 
     contours, _ = cv.findContours(closing.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     largest_area = sorted(contours, key=cv.contourArea)[-1:]
     cv.drawContours(mask, largest_area, 0, (255,255,255), cv.FILLED)
 
     return mask[:,:,0]
+
+def generate_background_mask(image_path):
+    img = np.array(cv.imread(image_path))
+    image = img.copy()
+    image[image > 250] = 0
+    image = Image.fromarray(image)
+    
+    image = image.filter(ImageFilter.MinFilter(3))
+    image = ImageEnhance.Contrast(image).enhance(2)
+
+    image = np.array(image)
+    gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    mask = np.zeros(image.shape, np.uint8)
+    
+    gray = cv.medianBlur(gray, 5)
+    ret, gray = cv.threshold(gray, 30,255, cv.THRESH_BINARY)
+
+    closing_kernel = np.ones((15,15),np.uint8)
+    closing = cv.morphologyEx(gray, cv.MORPH_CLOSE, closing_kernel, iterations=1)
+
+    contours, _ = cv.findContours(closing.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    largest_area = sorted(contours, key=cv.contourArea)[-1:]
+    cv.drawContours(mask, largest_area, 0, (255,255,255), cv.FILLED)
+    dst = cv.bitwise_and(img, mask)
+    
+    return dst
 
 def remove_background():
     imgs_dirs = glob.glob("our_dataset/dataset_DME/4/images/*")#
@@ -213,4 +239,15 @@ if __name__ == "__main__":
     # overlap()
     # filter_noise()
     # remove_background()
-    random_seperate_test()
+    # random_seperate_test()
+    # list_of_data = glob.glob("our_dataset/original/train/*")
+    # for item in list_of_data:
+    #     image_name = item.split('/')[-1]
+    #     res = generate_background_mask(item)
+    #     cv.imwrite('our_dataset/mask_background/train/{}'.format(image_name), res)
+
+    list_of_test = glob.glob("our_dataset/original/test/*")
+    for item in list_of_test:
+        image_name = item.split('/')[-1]
+        res = generate_background_mask(item)
+        cv.imwrite('our_dataset/mask_background/test/{}'.format(image_name), res)

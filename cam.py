@@ -147,18 +147,11 @@ def save_cam_for_inference(params, cam):
             except:
                 print(save_class_name, im_h)
                 import pdb; pdb.set_trace()
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
                
 def save_cam_results(params, is_inference=False):
-    args = params['args']
-    model = params['model']
+    cam = params['cam']
     # batch_preds [BC] B: batch, C: Class
-    if args.cam_type == 'gradcam':
-        target_layers = [model.multi_task_model.base_model[-1][-1]]
-        cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
-    else: 
-        target_layers = [model.multi_task_model.base_model[-1][-1]]
-        cam = GradCAM(model=model, use_cuda=args.device, target_layers=target_layers)
     if is_inference:
         save_cam_for_inference(params, cam)
         return
@@ -247,7 +240,7 @@ def get_pseudo_label(params, cam):
         
         labels = np.argmax(np.array(all_grey), axis=0) # (256, 256) with 0-6 labels
         pseudo_labels.append(labels)
-    return torch.Tensor(pseudo_labels)
+    return torch.LongTensor(pseudo_labels)
     
 
 if __name__ == "__main__":

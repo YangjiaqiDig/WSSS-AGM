@@ -23,7 +23,7 @@ class OCTDataset(Dataset):
             self.labels_table['BackGround'] = 1
         self.transform = transform
         self.roots = args.root_dirs
-        self.input_structure = args.input_structure
+        # self.input_structure = args.input_structure
         self.data_type = data_type
 
     def __getitem__(self, idx):
