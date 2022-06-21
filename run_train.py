@@ -13,7 +13,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-DEVICE_NR = '0'
+DEVICE_NR = '1'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 
@@ -157,6 +157,12 @@ class Train():
         self.seg_model.train()
         target_layers = [self.cam_model.multi_task_model.base_model[-1][-1]]
         cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=target_layers)
+
+        total_acc = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
+        total_loss, total_seg_loss = 0, 0
+        gt_list = torch.empty(0,len(OrgLabels)).to(self.device)
+        pred_list = torch.empty(0,len(OrgLabels)).to(self.device)
+        
         for batch, data in tqdm(enumerate(self.trainloader), total=len(self.trainloader)):
             image, labels = data["image"].to(self.device), data["labels"].to(self.device)
             updated_image = image.clone()
@@ -166,9 +172,9 @@ class Train():
                 updated_image = torch.cat((image, gan_tensor), dim=1)
             if (epoch + 1) > self.args.refine_epoch_point or self.args.continue_train:
                 if (epoch + 1) > (self.args.refine_epoch_point + self.args.n_refine_background) or self.args.continue_train:
-                    updated_image = refine_input_by_cam(self.args, self.cam_model, updated_image, cam)
+                    updated_image = refine_input_by_cam(self.args, self.cam_model, updated_image, data["mask"], cam)
                 else:
-                    updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, cam)
+                    updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, data["mask"], cam)
             self.cam_optimizer.zero_grad()
             outputs = self.cam_model(updated_image)
             combined_loss = self.cam_loss(outputs, labels)
@@ -183,41 +189,16 @@ class Train():
                 segmentation_loss = self.loss_seg(seg_outputs, pseudo_label.to(self.device))
                 segmentation_loss.backward()
                 self.seg_optimizer.step()
-        self.cam_lr_scheduler.step()
-        
-        self.cam_model.eval()
-        self.seg_model.eval()
-        total_acc = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
-        total_loss, total_seg_loss = 0, 0
-        gt_list = torch.empty(0,len(OrgLabels)).to(self.device)
-        pred_list = torch.empty(0,len(OrgLabels)).to(self.device)
-        for batch, data in enumerate(self.trainloader):
-            image, labels = data["image"].to(self.device), data["labels"].to(self.device)
-            updated_image = image.clone()
-            if self.args.input_gan:
-                input_for_gan = self.transform_norml(updated_image)
-                gan_tensor = self.gan_pretrained.inference(input_for_gan)
-                updated_image = torch.cat((image, gan_tensor), dim=1)
-            if (epoch + 1) > self.args.refine_epoch_point or self.args.continue_train:
-                if (epoch + 1) > (self.args.refine_epoch_point + self.args.n_refine_background) or self.args.continue_train:
-                    updated_image = refine_input_by_cam(self.args, self.cam_model, updated_image, cam)
-                else:
-                    updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, cam)
-            outputs = self.cam_model(updated_image)
-            if self.args.segmentation < epoch + 1:
-                outputs_for_seg = outputs.clone()
-                params_seg = {'inputs': data, 'batch_preds': outputs_for_seg, 'refined': updated_image}
-                pseudo_label = get_pseudo_label(params_seg, cam) # (batch, w, h) pixel value in (0, nb_class - 1)
-                seg_outputs = self.seg_model(updated_image) #(batch, nb_class, w, h), include 0 as background
-                segmentation_loss = self.loss_seg(seg_outputs, pseudo_label.to(self.device))
-                total_seg_loss += segmentation_loss.cpu().item()            
+                
+                total_seg_loss += segmentation_loss.cpu().item()
             with torch.no_grad():
-                combined_loss = self.cam_loss(outputs, labels)
                 total_loss += combined_loss.cpu().item()
                 batch_accuracies_metrics = calculate_metrics(outputs, labels)
                 total_acc += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
                 pred_list = torch.cat((pred_list, outputs))
+                
+        self.cam_lr_scheduler.step()
             
         train_acc_epoch, train_loss_epoch, train_seg_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc.items()}, total_loss / (batch + 1), total_seg_loss / (batch + 1)
         roc_avg, roc_class = calculate_roc(pred_list, gt_list)

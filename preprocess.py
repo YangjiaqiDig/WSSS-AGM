@@ -1,3 +1,4 @@
+from itertools import count
 import shutil
 import os, glob
 from PIL import Image, ImageFilter, ImageEnhance
@@ -174,7 +175,7 @@ def generate_background_mask(image_path):
     cv.drawContours(mask, largest_area, 0, (255,255,255), cv.FILLED)
     dst = cv.bitwise_and(img, mask)
     
-    return dst
+    return mask#dst
 
 def remove_background():
     imgs_dirs = glob.glob("our_dataset/dataset_DME/4/images/*")#
@@ -235,19 +236,20 @@ def random_seperate_test():
     combined_df = combined_df.sort_values(by=[ 'Definite DRIL'], ascending=False)
     print(combined_df.iloc[:30])
 #3882196|3565572|4240465|224974|2205167|3491563|DR91|DR10
+
 if __name__ == "__main__":
     # overlap()
     # filter_noise()
     # remove_background()
     # random_seperate_test()
-    # list_of_data = glob.glob("our_dataset/original/train/*")
-    # for item in list_of_data:
-    #     image_name = item.split('/')[-1]
-    #     res = generate_background_mask(item)
-    #     cv.imwrite('our_dataset/mask_background/train/{}'.format(image_name), res)
+    list_of_data = glob.glob("our_dataset/original/train/*")
+    for item in list_of_data:
+        image_name = item.split('/')[-1]
+        res = generate_background_mask(item)
+        cv.imwrite('our_dataset/mask/train/{}'.format(image_name), res)
 
     list_of_test = glob.glob("our_dataset/original/test/*")
     for item in list_of_test:
         image_name = item.split('/')[-1]
         res = generate_background_mask(item)
-        cv.imwrite('our_dataset/mask_background/test/{}'.format(image_name), res)
+        cv.imwrite('our_dataset/mask/test/{}'.format(image_name), res)

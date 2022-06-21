@@ -1,3 +1,4 @@
+from preprocess import background_mask
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, GuidedBackpropReLUModel
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
@@ -20,6 +21,7 @@ def save_cam_during_train(params, cam):
     args, epoch, inputs, batch_preds, updated_image = params['args'], params['epoch'], params['inputs'], params['batch_preds'], params['refined']
     for i, pred in enumerate(batch_preds):
         orig_image = inputs["image"][i][0].clone()
+        orig_mask = inputs['mask'][i][0].clone()
         rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
         img_path = inputs["path"][i].split('/')[-1]
         save_path = os.path.join(args.save_folder, 'iteration', '{}'.format(img_path.split('.')[0]))
@@ -50,8 +52,8 @@ def save_cam_during_train(params, cam):
             
             strict_grey = grey_thred.copy()
             if OrgLabels[cls] in ['IRF', 'SRF']:
-                strict_grey[orig_image > 0.2] = 0 #keep bubble region (dark)
-            else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
+                strict_grey[(orig_image > 0.2) | (orig_mask == 0)] = 0 #keep bubble region (dark)
+            else: strict_grey[(orig_image < 0.5) | (orig_mask == 0)] = 0 # hrd, ez keep the light layer region
                      
             if OrgLabels[cls] != 'BackGround': # dont illustrate the background
                 all_grey[cls + 1] = strict_grey
@@ -86,6 +88,7 @@ def save_cam_for_inference(params, cam):
     # softmax = nn.Softmax()
     for i, pred in enumerate(batch_preds):
         orig_image = inputs["image"][i][0].clone()
+        orig_mask = inputs['mask'][i][0].clone()
         rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
         img_path = inputs["path"][i].split('/')[-1]
         save_path = os.path.join(args.save_inference, '{}'.format(img_path.split('.')[0]))
@@ -115,9 +118,9 @@ def save_cam_for_inference(params, cam):
             
             strict_grey = grey_thred.copy()
             if OrgLabels[cls] in ['IRF', 'SRF']:
-                strict_grey[orig_image > 0.2] = 0 #keep bubble region (dark)
+                strict_grey[(orig_image > 0.2) | (orig_mask == 0)] = 0 #keep bubble region (dark)
                 # strict_grey = strict_grey * (1 - orig_image).cpu().numpy()
-            else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
+            else: strict_grey[(orig_image < 0.5) | (orig_mask == 0)] = 0 # hrd, ez keep the light layer region
             # strict_grey[strict_grey < 0.7] = 0
             
             # cv2.imwrite('test{0}.jpg'.format(cls), strict_grey * 255)
@@ -165,7 +168,7 @@ Muli(cam) -> 0
 Sum(cam5) -> 1
 filter cam5 -> cam2 -> Sum() -> normalize
 '''
-def refine_input_by_cam(args, model, image, cam, aug_smooth=True):
+def refine_input_by_cam(args, model, image, mask, cam, aug_smooth=True):
     outputs = model(image)
     bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
     batch_cam_masks = []
@@ -187,7 +190,9 @@ def refine_input_by_cam(args, model, image, cam, aug_smooth=True):
         min, max = sum_masks.min(), sum_masks.max()
         sum_masks.add_(-min).div_(max - min + 1e-5) 
         # BackGround CAM * normalized CAM * Original Image. does norm -> multiply order matter?
-        background_mask = singel_cam_masks[-1] # Background CAM
+        # background_mask = singel_cam_masks[-1] # Background CAM
+        background_mask = mask.copy()
+        background_mask[background_mask == 0] = 0.2
         
         soft_apply = sum_masks * background_mask * image[batch_idx, :3,] # [3, w, h]
         soft_min, soft_max = soft_apply.min(), soft_apply.max()
@@ -196,7 +201,7 @@ def refine_input_by_cam(args, model, image, cam, aug_smooth=True):
         updated_input_tensor[batch_idx, :3,] = soft_apply
     return updated_input_tensor
 
-def refine_input_by_background_cam(args, model, image, cam, aug_smooth=True):
+def refine_input_by_background_cam(args, model, image, mask, cam, aug_smooth=True):
     outputs = model(image)
     bacth_bg_preds = (outputs[:, -1] > 0.5) * 1 # [batch] -> (0,1)
     bg_cls = len(OrgLabels) - 1
@@ -220,6 +225,7 @@ def get_pseudo_label(params, cam):
     pseudo_labels = []
     for i, pred in enumerate(batch_preds):
         orig_image = inputs["image"][i][0].clone()
+        orig_mask = inputs['mask'][i][0].clone()
         w, h = inputs["image"][i].shape[-2], inputs["image"][i].shape[-1]
         pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
         all_grey = [np.zeros((w, h))] * (len(OrgLabels) + 1)
@@ -233,8 +239,8 @@ def get_pseudo_label(params, cam):
             
             strict_grey = grey_thred.copy()
             if OrgLabels[cls] in ['IRF', 'SRF']:
-                strict_grey[orig_image > 0.2] = 0 #keep bubble region (dark)
-            else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
+                strict_grey[(orig_image > 0.2) | (orig_mask == 0)] = 0 #keep bubble region (dark)
+            else: strict_grey[(orig_image < 0.5) | (orig_mask == 0)] = 0 # hrd, ez keep the light layer region
             if OrgLabels[cls] != 'BackGround': # dont illustrate the background
                 all_grey[cls + 1] = strict_grey
         
