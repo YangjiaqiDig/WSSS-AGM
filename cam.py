@@ -169,7 +169,8 @@ Sum(cam5) -> 1
 filter cam5 -> cam2 -> Sum() -> normalize
 '''
 def refine_input_by_cam(args, model, image, mask, cam, aug_smooth=True):
-    outputs = model(image)
+    with torch.no_grad():
+        outputs = model(image)
     bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
     batch_cam_masks = []
     for cls in range(len(OrgLabels)):
@@ -190,7 +191,7 @@ def refine_input_by_cam(args, model, image, mask, cam, aug_smooth=True):
         # normalize the above 'attention map' to 0-1
         min, max = sum_masks.min(), sum_masks.max()
         sum_masks.add_(-min).div_(max - min + 1e-5) 
-        # BackGround CAM * normalized CAM * Original Image. does norm -> multiply order matter?
+        ''' BackGround CAM * normalized CAM * Original Image. does norm -> multiply order matter? '''
         # background_mask = singel_cam_masks[-1] # Background CAM
         background_mask = mask[batch_idx].clone()
         background_mask[background_mask == 0] = 0.2

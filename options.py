@@ -31,7 +31,7 @@ class Configs():
         self.parser.add_argument("--w_ce", type=float, default=1, help="Cross Entropy loss weight")
         self.parser.add_argument("--w_dice", type=float, default=0, help="Dice loss weight")
         self.parser.add_argument("--n_epochs", type=int, default=50, help="Number of training epochs")
-        self.parser.add_argument("--refine_epoch_point", type=int, default=0, help="The start epoch for refine input by cam")
+        self.parser.add_argument("--refine_epoch_point", type=int, default=35, help="The start epoch for refine input by cam")
         
         self.parser.add_argument("--train_batch_size", type=int,default=8, help="Batch size for training")
         self.parser.add_argument("--valid_batch_size", type=int,default=1, help="Batch size for validation")
@@ -50,7 +50,7 @@ class Configs():
         self.parser.add_argument("--save_inference", type=str, default='outputs_inference', help="Save inference or test images directory")
         self.parser.add_argument("--num_iteration", type=int, default=5, help="Number of iterations for refine CAM")
         
-        # currently deprecated
+        ''' currently deprecated '''
         # self.parser.add_argument("--k_folds", type=int, default=10, help="k folds")
         # self.parser.add_argument("--input_structure", type=bool, default=False, help="If involve Struture as input")
         self.parser.add_argument("--n_refine_background", type=int, default=0, help="Number of background only refinement")
