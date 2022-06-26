@@ -179,9 +179,10 @@ def refine_input_by_cam(args, model, image, mask, cam, aug_smooth=True):
         grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels
         batch_cam_masks.append(grayscale_tensor) # cls, [batch, 3, w, h]
     updated_input_tensor = image.clone()
-    for batch_idx in range(len(bacth_preds)):
+    for batch_idx, single_batch_pred in enumerate(bacth_preds):
         singel_cam_masks = [batch_cam_mask[batch_idx] for batch_cam_mask in batch_cam_masks] # cls, [3, w, h]
-        curr_preds = bacth_preds[batch_idx] # (cls)
+        # curr_preds = single_batch_pred # (cls) 0/1 values as outputs threshold by 0.5
+        curr_preds = outputs[batch_idx] # classification probability
         '''if predict 1, keep the class cam, else 0, turn cam to 0 black image. Except last class BackGround'''
         target_classes_cam = [class_cam * curr_preds[l] for l, class_cam in enumerate(singel_cam_masks[:-1])]
         # sum the cams for predicted classes
@@ -191,16 +192,20 @@ def refine_input_by_cam(args, model, image, mask, cam, aug_smooth=True):
         sum_masks.add_(-min).div_(max - min + 1e-5) 
         # BackGround CAM * normalized CAM * Original Image. does norm -> multiply order matter?
         # background_mask = singel_cam_masks[-1] # Background CAM
-        background_mask = mask.copy()
+        background_mask = mask[batch_idx].clone()
         background_mask[background_mask == 0] = 0.2
+        soft_apply = sum_masks * background_mask # cam predicts * background constraints
         
-        soft_apply = sum_masks * background_mask * image[batch_idx, :3,] # [3, w, h]
-        soft_min, soft_max = soft_apply.min(), soft_apply.max()
-        soft_apply.add_(-soft_min).div_(soft_max - soft_min + 1e-5)
-        
-        updated_input_tensor[batch_idx, :3,] = soft_apply
+        num_channels = image.shape[1]
+        for s in range(0, num_channels, 3):
+            inputs_after_soft_addon = soft_apply * image[batch_idx, s:s+3,] # [3, w, h]
+            # normilize the input image after addon soft map on origin input (both origin & gan)
+            soft_min, soft_max = inputs_after_soft_addon.min(), inputs_after_soft_addon.max()
+            inputs_after_soft_addon.add_(-soft_min).div_(soft_max - soft_min + 1e-5)
+            updated_input_tensor[batch_idx, s:s+3,] = inputs_after_soft_addon
     return updated_input_tensor
 
+# Not use in current version
 def refine_input_by_background_cam(args, model, image, mask, cam, aug_smooth=True):
     outputs = model(image)
     bacth_bg_preds = (outputs[:, -1] > 0.5) * 1 # [batch] -> (0,1)

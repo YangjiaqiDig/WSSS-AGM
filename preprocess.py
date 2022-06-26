@@ -244,12 +244,12 @@ if __name__ == "__main__":
     # random_seperate_test()
     list_of_data = glob.glob("our_dataset/original/train/*")
     for item in list_of_data:
-        image_name = item.split('/')[-1]
+        image_name = item.split('/')[-1].split('.')[0]
         res = generate_background_mask(item)
-        cv.imwrite('our_dataset/mask/train/{}'.format(image_name), res)
+        cv.imwrite('our_dataset/mask/train/{}.png'.format(image_name), res)
 
     list_of_test = glob.glob("our_dataset/original/test/*")
     for item in list_of_test:
-        image_name = item.split('/')[-1]
+        image_name = item.split('/')[-1].split('.')[0]
         res = generate_background_mask(item)
-        cv.imwrite('our_dataset/mask/test/{}'.format(image_name), res)
+        cv.imwrite('our_dataset/mask/test/{}.png'.format(image_name), res)

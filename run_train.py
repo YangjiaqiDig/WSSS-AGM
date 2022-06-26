@@ -2,6 +2,7 @@ import logging
 import os
 import time
 from collections import Counter
+from turtle import pd
 
 from pytorch_grad_cam import GradCAM
 import torch
@@ -19,7 +20,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 from gan_inference import load_gan_model
 from dataset import (OCTDataset, train_transform, valid_transform)
-from cam import save_cam_results, refine_input_by_cam, refine_input_by_background_cam, get_pseudo_label
+from cam import save_cam_results, refine_input_by_cam, get_pseudo_label
 from models import MultiTaskModel, CAM_Net, U_Net
 from utils import OrgLabels, calculate_metrics, calculate_roc, save_models, save_tensorboard
 from options import Configs
@@ -115,17 +116,19 @@ class Train():
         gt_list = torch.empty(0,len(OrgLabels)).to(self.device)
         pred_list = torch.empty(0,len(OrgLabels)).to(self.device)
         for batch, data in tqdm(enumerate(self.testloader), total=len(self.testloader)):
-            image, labels = data["image"].to(self.device), data["labels"].to(self.device)        
+            image, labels, mask = data["image"].to(self.device), data["labels"].to(self.device), data['mask'].to(self.device)        
             updated_image = image.clone()
             if self.args.input_gan:
                 input_for_gan = self.transform_norml(updated_image)
                 gan_tensor = self.gan_pretrained.inference(input_for_gan)
                 updated_image = torch.cat((image, gan_tensor), dim=1)
+            if self.args.mask_enhance:
+                mask_clone = mask.clone()
+                mask_clone[mask_clone == 0] = 0.2
+                updated_image[:,:3] = updated_image[:,:3] * mask_clone
+                updated_image[:,3:] = updated_image[:,3:] * mask_clone
             if (epoch + 1) > self.args.refine_epoch_point or self.args.continue_train:
-                if (epoch + 1) > (self.args.refine_epoch_point + self.args.n_refine_background) or self.args.continue_train:
-                    updated_image = refine_input_by_cam(self.args, self.cam_model, updated_image, cam)
-                else:
-                    updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, cam)
+                updated_image = refine_input_by_cam(self.args, self.cam_model, updated_image, mask, cam)
             outputs = self.cam_model(updated_image)
             if self.args.segmentation < epoch + 1:
                 outputs_for_seg = outputs.clone()
@@ -164,17 +167,19 @@ class Train():
         pred_list = torch.empty(0,len(OrgLabels)).to(self.device)
         
         for batch, data in tqdm(enumerate(self.trainloader), total=len(self.trainloader)):
-            image, labels = data["image"].to(self.device), data["labels"].to(self.device)
+            image, labels, mask = data["image"].to(self.device), data["labels"].to(self.device), data['mask'].to(self.device)
             updated_image = image.clone()
             if self.args.input_gan:
                 input_for_gan = self.transform_norml(updated_image)
                 gan_tensor = self.gan_pretrained.inference(input_for_gan)
                 updated_image = torch.cat((image, gan_tensor), dim=1)
+            if self.args.mask_enhance:
+                mask_clone = mask.clone()
+                mask_clone[mask_clone == 0] = 0.2
+                updated_image[:,:3] = updated_image[:,:3] * mask_clone
+                updated_image[:,3:] = updated_image[:,3:] * mask_clone
             if (epoch + 1) > self.args.refine_epoch_point or self.args.continue_train:
-                if (epoch + 1) > (self.args.refine_epoch_point + self.args.n_refine_background) or self.args.continue_train:
-                    updated_image = refine_input_by_cam(self.args, self.cam_model, updated_image, data["mask"], cam)
-                else:
-                    updated_image = refine_input_by_background_cam(self.args, self.cam_model, updated_image, data["mask"], cam)
+                updated_image = refine_input_by_cam(self.args, self.cam_model, updated_image, mask, cam)
             self.cam_optimizer.zero_grad()
             outputs = self.cam_model(updated_image)
             combined_loss = self.cam_loss(outputs, labels)

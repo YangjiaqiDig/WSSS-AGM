@@ -9,12 +9,13 @@ import torch
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
 import random
+import logging
 # pd.set_option("display.max_rows", None)
-
+logging.getLogger('PIL').setLevel(logging.WARNING)
 class OCTDataset(Dataset): 
     def __init__(self, args, transform, data_type, infer_list=[]):
         self.file_list = {'train': glob.glob("{}/train/*".format(args.root_dirs)), 'test': glob.glob("{}/test/*".format(args.root_dirs))}
-        self.mask_list = {'train': glob.glob("{}/train/*".format(args.mask_dir)), 'test': glob.glob("{}/test/*".format(args.mask_dir))}
+        self.mask_list = {'train': glob.glob("{}/train/*.png".format(args.mask_dir)), 'test': glob.glob("{}/test/*.png".format(args.mask_dir))}
         if data_type == 'inference':
             self.file_list = {'inference': ["{}/test/{}".format(args.root_dirs, item) for item in infer_list]}
         self.labels_table = pd.read_csv("our_dataset/labels.csv")
@@ -47,7 +48,10 @@ class OCTDataset(Dataset):
         image_tensor = self.transform(image_arr)
         torch.manual_seed(seed)
         mask_tensor = self.transform(mask)
-
+        # vutils.save_image(mask_tensor, 'waht2.png', normalize=False, scale_each=True)
+        # after resize, the mask becomes non-binary
+        mask_tensor[mask_tensor <= 0.5] = 0
+        mask_tensor[mask_tensor > 0.5] = 1
         if image_name in self.labels_table['img'].values:
             labels = self.labels_table.loc[self.labels_table['img'] == image_name]
         else:
