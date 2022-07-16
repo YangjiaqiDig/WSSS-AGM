@@ -12,14 +12,16 @@ P_Net_Anomaly*/*
 ganomaly/*
 anomalib/*
 logs/
-oct_kaggle/
-our_dataset/
 gan_and_str/
 gozde/
 outputs*/
 pretrained/
 runs/*
+
+# dataset ignore
 deprecated.zip
+oct_kaggle/
+our_dataset/
 OCT-Segmentation/
 RESC/
 mvtec/
