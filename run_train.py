@@ -4,7 +4,7 @@ import time
 from collections import Counter
 from turtle import pd
 
-from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, GuidedBackpropReLUModel
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,12 +14,12 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-DEVICE_NR = '1'
+DEVICE_NR = '0'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 
 from gan_inference import load_gan_model
-from dataset import (OCTDataset, train_transform, valid_transform)
+from dataset import (OCTDataset, RESCDataset)
 from cam import save_cam_results, refine_input_by_cam, get_pseudo_label
 from models import MultiTaskModel, CAM_Net, U_Net
 from utils import OrgLabels, calculate_metrics, calculate_roc, save_models, save_tensorboard
@@ -62,9 +62,13 @@ class Train():
         if self.device == "cuda":
             print("Number of GPUs: ", torch.cuda.device_count(), "Device Nbr: ", DEVICE_NR)
             
-        torch.manual_seed(42)
-        self.dataset_train = OCTDataset(self.args, transform=train_transform(self.args.is_size), data_type='train')
-        self.dataset_test = OCTDataset(self.args, transform=valid_transform(self.args.is_size), data_type='test')
+        # torch.manual_seed(42)
+        if 'our_dateset' in self.args.root_dirs:
+            self.dataset_train = OCTDataset(self.args, data_type='train')
+            self.dataset_test = OCTDataset(self.args, data_type='test')
+        elif 'RESC' in self.args.root_dirs:
+            self.dataset_train = RESCDataset(self.args, data_type='train')
+            self.dataset_test = RESCDataset(self.args, data_type='test')
 
         self.backbone = network_class(self.args)
         self.num_class = len(OrgLabels)
@@ -106,13 +110,14 @@ class Train():
         self.loss_cam = nn.BCELoss()#nn.BCEWithLogitsLoss()#
         self.loss_seg = nn.CrossEntropyLoss()        
         
+        self.target_layers = [self.cam_model.multi_task_model.base_model[-1][-1]]
+        
     def valid_once(self, epoch):
         self.cam_model.eval()
         self.seg_model.eval()
         total_acc_val = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
         total_loss_val, total_seg_loss_val = 0, 0
-        target_layers = [self.cam_model.multi_task_model.base_model[-1][-1]]
-        cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=target_layers)
+        cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=self.target_layers)
         gt_list = torch.empty(0,len(OrgLabels)).to(self.device)
         pred_list = torch.empty(0,len(OrgLabels)).to(self.device)
         for batch, data in tqdm(enumerate(self.testloader), total=len(self.testloader)):
@@ -158,8 +163,7 @@ class Train():
     def train_once(self, epoch):
         self.cam_model.train()
         self.seg_model.train()
-        target_layers = [self.cam_model.multi_task_model.base_model[-1][-1]]
-        cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=target_layers)
+        cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=self.target_layers)
 
         total_acc = Counter({'acc': 0, 'f1m': 0, 'f1mi': 0})
         total_loss, total_seg_loss = 0, 0
@@ -256,14 +260,19 @@ class Train():
         # if not give infer list of image names, then default as infer all testing
         self.args.continue_train = True
         self.train_parameters()
-        infer_dataset = self.dataset_test if not len(infer_list) else OCTDataset(self.args, transform=valid_transform(self.args.is_size), data_type='inference', infer_list=infer_list)
+        if 'our_dateset' in self.args.root_dirs:
+            curr_dataset = OCTDataset(self.args, data_type='inference', infer_list=infer_list)
+        elif 'RESC' in self.args.root_dirs:
+            curr_dataset = RESCDataset(self.args, data_type='inference', infer_list=infer_list)
+
+        infer_dataset = self.dataset_test if not len(infer_list) else curr_dataset
         dataloader = torch.utils.data.DataLoader(
             infer_dataset,
             num_workers=8,
             batch_size=self.args.valid_batch_size, shuffle=False)
         self.cam_model.eval()
-        target_layers = [self.cam_model.multi_task_model.base_model[-1][-1]]
-        cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=target_layers)
+        
+        cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=self.target_layers)
         for batch, data in tqdm(enumerate(dataloader), total=len(dataloader)):
             image, labels = data["image"].to(self.device), data["labels"].to(self.device)        
             updated_image = image.clone()
@@ -273,7 +282,7 @@ class Train():
                 updated_image = torch.cat((image, gan_tensor), dim=1)
             outputs = self.cam_model(updated_image)
             # maybe only for args.n_epochs in first condition
-            params = {'args': self.args, 'cam': cam, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
+            params = {'args': self.args, 'cam': cam, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image, 'model':  self.cam_model}
             save_cam_results(params, is_inference=True)
 
 if __name__ == "__main__":

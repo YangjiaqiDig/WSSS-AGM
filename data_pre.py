@@ -1,3 +1,4 @@
+import glob
 import pandas as pd 
 import shutil
 import os
@@ -68,5 +69,21 @@ def prepare_dr_dataset():
         np.save("{0}/{1}.npy".format('train_dr', idx), dic)
         shutil.copy(img_path, "{0}/{1}_{2}".format('train_dr', idx, filename))
 
+def prepare_resc_dataset():
+    root_dir = "RESC/train/label_images"
+    # rename all the sub-folders to unique shorter name, skip the code here
+    
+    # flatten the images
+    subfolders = glob.glob("{}/*".format(root_dir))
+    for sub_folder in subfolders:
+        print(sub_folder)
+        patient_id = sub_folder.split('/')[-1]
+        images = os.listdir(sub_folder)
+        for image in images:
+            old_path = "{}/{}".format(sub_folder, image)
+            new_path = "{}/{}_{}".format(root_dir, patient_id, image)
+            shutil.move(old_path, new_path)
+
 if __name__ == "__main__":
-    prepare_dr_dataset()
+    # prepare_dr_dataset()
+    prepare_resc_dataset()

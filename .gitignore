@@ -21,3 +21,6 @@ pretrained/
 runs/*
 deprecated.zip
 OCT-Segmentation/
+RESC/
+mvtec/
+2015_BOE_Chiu

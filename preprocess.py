@@ -237,11 +237,7 @@ def random_seperate_test():
     print(combined_df.iloc[:30])
 #3882196|3565572|4240465|224974|2205167|3491563|DR91|DR10
 
-if __name__ == "__main__":
-    # overlap()
-    # filter_noise()
-    # remove_background()
-    # random_seperate_test()
+def generate_mask_our_dataset():
     list_of_data = glob.glob("our_dataset/original/train/*")
     for item in list_of_data:
         image_name = item.split('/')[-1].split('.')[0]
@@ -253,3 +249,23 @@ if __name__ == "__main__":
         image_name = item.split('/')[-1].split('.')[0]
         res = generate_background_mask(item)
         cv.imwrite('our_dataset/mask/test/{}.png'.format(image_name), res)
+
+def generate_mask_resc():
+    list_of_data = glob.glob("RESC/train/original_images/*")
+    for item in list_of_data:
+        image_name = item.split('/')[-1]
+        res = generate_background_mask(item)
+        cv.imwrite('RESC/mask/train/{}'.format(image_name), res)
+
+    list_of_test = glob.glob("RESC/valid/original_images/*")
+    for item in list_of_test:
+        image_name = item.split('/')[-1]
+        res = generate_background_mask(item)
+        cv.imwrite('RESC/mask/valid/{}'.format(image_name), res)
+
+if __name__ == "__main__":
+    # overlap()
+    # filter_noise()
+    # remove_background()
+    # random_seperate_test()
+    generate_mask_resc()

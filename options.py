@@ -19,12 +19,13 @@ class Configs():
 
     def __init__(self):
         self.parser = argparse.ArgumentParser()
-        self.parser.add_argument("--root_dirs", type=str, default="our_dataset/original", help="root datasets directory")
-        self.parser.add_argument("--mask_dir", type=str, default="our_dataset/mask", help="Retinal mask datasets directory")
-        self.parser.add_argument("--save_folder", type=str, default="outputs/mask_enhance_gan_blg_refine", help="Path or url of the dataset")
+        self.parser.add_argument("--root_dirs", type=str, default="RESC", help="root datasets directory")
+        self.parser.add_argument("--mask_dir", type=str, default="RESC/mask", help="Retinal mask datasets directory")
+        self.parser.add_argument("--save_folder", type=str, default="outputs/RESC/resc_orig_gan", help="Path or url of the dataset")
         self.parser.add_argument("--labels", type=str, default=['SRF', 'IRF', 'EZ', 'HRD', 'BackGround'], help="['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround', 'EZ attenuated', 'EZ disrupted', 'Retinal Traction', 'Definite DRIL']")
+        self.parser.add_argument("--resc_labels", type=str, default=['SRF', 'PED', 'BackGround'], help="['SRF', 'PED', 'LESION', 'BackGround']")        
         self.parser.add_argument("--contrast", type=bool, default=False, help="Increase contrast of input image")
-        self.parser.add_argument("--mask_enhance", type=bool, default=True, help="Mask input image by enhance")
+        self.parser.add_argument("--mask_enhance", type=bool, default=False, help="Mask input image by enhance")
         
         self.parser.add_argument("--segmentation", type=int, default=100, help="The number of epoch that starts segmentation branch")
         self.parser.add_argument("--input_gan", type=bool, default=True, help="If involve GANs generation as input")
@@ -38,7 +39,7 @@ class Configs():
         self.parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
         self.parser.add_argument("--lr_schedule", type=dict, default={'step': 10, 'gamma': 0.5}, help="Learning rate decay step and gamma")
         
-        self.parser.add_argument("--check_point", type=str, default="outputs/orig_gan_bgl_v2", help="Path of the pre-trained Network")
+        self.parser.add_argument("--check_point", type=str, default="outputs/original_gan_blg_refine_byProb", help="Path of the pre-trained Network")
         self.parser.add_argument("--continue_train", type=bool, default=False, help="Continue train")
         self.parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
         self.parser.add_argument("--cam_type", type=str, default="gradcam", help="GradCAM")
@@ -66,6 +67,8 @@ class Configs():
             opt_file.write('-------------- End ----------------\n')
         return args
    
-    def get_labels(self):
+    def get_labels(self, type='ours'):
+        if type == 'resc':
+            return self.parser.parse_args().resc_labels
         return self.parser.parse_args().labels
         
