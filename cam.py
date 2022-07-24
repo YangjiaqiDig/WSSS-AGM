@@ -1,5 +1,7 @@
+from turtle import pd
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, GuidedBackpropReLUModel
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from test import SegmentationMetric
 import torch
 import os
 import numpy as np
@@ -30,6 +32,8 @@ def save_cam_during_train(params, cam):
         truth_label = '_'.join(truth_label)
         w, h = inputs["image"][i].shape[-2], inputs["image"][i].shape[-1]
         save_img = inputs["image"][i].reshape(-1,3,w, h)
+        if 'annot' in inputs:
+            save_img = torch.cat([save_img, inputs["annot"][i].reshape(-1,3,w, h).to(args.device)], 0)
         save_updated_img = updated_image[i].reshape(-1,3,w, h)
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True) # scale_each limit normalize for each independently in batch
         vutils.save_image(save_updated_img, save_path + '/epoch{0}_refined_{1}.jpg'.format(epoch, truth_label), normalize=True, scale_each=True)
@@ -48,7 +52,7 @@ def save_cam_during_train(params, cam):
             grey_thred[grey_thred < 0.3] = 0
             
             strict_grey = grey_thred.copy()
-            if OrgLabels[cls] in ['IRF', 'SRF']:
+            if OrgLabels[cls] in ['IRF', 'SRF', 'PED']:
                 strict_grey[(orig_image > 0.2) | (orig_mask == 0)] = 0 #keep bubble region (dark)
             else: strict_grey[(orig_image < 0.5) | (orig_mask == 0)] = 0 # hrd, ez keep the light layer region
                      
@@ -83,6 +87,8 @@ def save_cam_for_inference(params, cam):
     args, inputs, batch_preds, updated_image, model = params['args'], params['inputs'], params['batch_preds'], params['refined'], params['model']
     is_background_include = 'BackGround'in OrgLabels
     # softmax = nn.Softmax()
+    metric = SegmentationMetric(3)
+    ready_pred_4d = []
     for i, pred in enumerate(batch_preds):
         orig_image = inputs["image"][i][0].clone()
         orig_mask = inputs['mask'][i][0].clone()
@@ -97,8 +103,10 @@ def save_cam_for_inference(params, cam):
         truth_label = '_'.join(truth_label)
         w, h = inputs["image"][i].shape[-2], inputs["image"][i].shape[-1]
         save_img = updated_image[i].reshape(-1,3,w, h)
+        if 'annot' in inputs:
+            save_img = torch.cat([save_img, inputs["annot"][i].reshape(-1,3,w, h).to(args.device)], 0)
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True)
-        print(pred)
+        # print(pred)
         pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
         if is_background_include and len(pred_classes)==1 and OrgLabels.index('BackGround') == true_classes[0]:
             continue
@@ -123,7 +131,7 @@ def save_cam_for_inference(params, cam):
             # cam_gb = deprocess_image(cam_mask * gb)
             # gb = deprocess_image(gb)
             strict_grey = grey_thred.copy()
-            if OrgLabels[cls] in ['IRF', 'SRF']:
+            if OrgLabels[cls] in ['IRF', 'SRF', 'PED']:
                 strict_grey[orig_image > 0.15] = 0 #keep bubble region (dark) #| (orig_mask == 0)
             else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
             
@@ -138,11 +146,7 @@ def save_cam_for_inference(params, cam):
             save_cam_in_row.append(cam_image)
             save_class_name =  save_class_name + '_' + OrgLabels[cls]
 
-            # cv2.imwrite(f'cam.jpg', cam_image)
-            # cv2.imwrite(f'gb.jpg', gb[:,:,0])
-            # cv2.imwrite(f'cam_gb.jpg', cam_gb[:,:,0])
-            # import pdb; pdb.set_trace()
-
+        ready_pred_4d.append(np.array(all_grey)[:-1])
         labels = np.argmax(np.array(all_grey), axis=0)
         color_mask = np.zeros((w, h, 3))
         for i in range(1, len(OrgLabels) + 1):
@@ -162,7 +166,13 @@ def save_cam_for_inference(params, cam):
             except:
                 print(save_class_name, im_h)
                 import pdb; pdb.set_trace()
-        # import pdb; pdb.set_trace()
+    ready_pred_4d = torch.tensor(np.array(ready_pred_4d))
+    gt = inputs["annot"][:,0].clone()
+    gt[gt == 1] = 0
+    gt[gt > 0] = 1
+    metric.update(ready_pred_4d, gt)
+    print(metric.get())
+    import pdb; pdb.set_trace()
                
 def save_cam_results(params, is_inference=False):
     cam = params['cam']

@@ -14,7 +14,6 @@ type_color = {
     6: [255, 0, 255] # back ground pink
 }
 OrgLabels = Configs().get_labels()#['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround']
-RESCLabels = Configs().get_labels('resc') # ['SRF', 'PED']
 # 0.8247863247863247 0.7519246396739377 0.8247863247863247
 # 0.8301282051282052 0.7603308530659053 0.8301282051282052
 def calculate_metrics(outputs, labels):

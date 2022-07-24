@@ -55,9 +55,10 @@ def dsc_loss(y_pred, y_true, varepsilon=1.e-8):
 
 
 class Train():
-    def __init__(self):
+    def __init__(self, is_inference=False):
         self.args = Configs().parse()
-        self.tb = SummaryWriter('runs/{}'.format(self.args.save_folder.split('/')[-1]))
+        if not is_inference:
+            self.tb = SummaryWriter('runs/{}'.format(self.args.save_folder.split('/')[-1]))
         self.device = self.args.device 
         if self.device == "cuda":
             print("Number of GPUs: ", torch.cuda.device_count(), "Device Nbr: ", DEVICE_NR)
@@ -143,7 +144,7 @@ class Train():
                 segmentation_loss = self.loss_seg(seg_outputs, pseudo_label.to(self.device))
                 total_seg_loss_val += segmentation_loss.cpu().item()
             params = {'args': self.args, 'epoch': epoch, 'cam': cam, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
-            save_cam_results(params)  
+            naive_label = save_cam_results(params)  
                     
             with torch.no_grad():
             #     if self.args.continue_train or (epoch + 1) > self.args.refine_epoch_point:  
@@ -286,9 +287,9 @@ class Train():
             save_cam_results(params, is_inference=True)
 
 if __name__ == "__main__":
-    trainer = Train()
-    trainer.train()
-    # trainer.inference()
+    trainer = Train(is_inference=True)
+    # trainer.train()
+    trainer.inference(infer_list=['sn22698_97.bmp'])
     # trainer.inference(infer_list=['DME-15307-1.jpeg',
     #                               'DME-4240465-41.jpeg', 
     #                               'DR10.jpeg',

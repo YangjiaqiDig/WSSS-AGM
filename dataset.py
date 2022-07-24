@@ -4,7 +4,7 @@ from PIL import Image, ImageEnhance
 from torch.utils.data import Dataset
 from torchvision import transforms
 import torchvision.utils as vutils
-from utils import OrgLabels, RESCLabels
+from utils import OrgLabels
 import torch
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
@@ -81,6 +81,74 @@ class RESCDataset(Dataset):
     def __init__(self, args, data_type, infer_list=[]):
         self.file_list = {'train': glob.glob("{}/train/original_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/original_images/*".format(args.root_dirs))}
         self.mask_list = {'train': glob.glob("{}/train/*".format(args.mask_dir)), 'test': glob.glob("{}/valid/*".format(args.mask_dir))}
+        self.labels_list = {'train': glob.glob("{}/train/label_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/label_images/*".format(args.root_dirs))}
+
+        if data_type == 'inference':
+            self.file_list = {'inference': ["{}/valid/original_images/{}".format(args.root_dirs, item) for item in infer_list]}
+            self.mask_list = {'inference': ["{}/valid/{}".format(args.mask_dir, item) for item in infer_list]}
+            self.labels_list = {'inference': ["{}/valid/label_images/{}".format(args.root_dirs, item) for item in infer_list]}
+        if data_type == 'train':
+            self.transform = train_transform(args.is_size, False)
+            self.transform_mask = train_transform(args.is_size, True)
+        else:
+            self.transform= valid_transform(args.is_size, False)
+            self.transform_mask = valid_transform(args.is_size, True)
+        self.roots = args.root_dirs
+        self.data_type = data_type
+        self.args = args
+
+    def __getitem__(self, idx):
+        data_path = sorted(self.file_list[self.data_type])[idx]
+        mask_path = sorted(self.mask_list[self.data_type])[idx]
+        label_path =  sorted(self.labels_list[self.data_type])[idx]
+        
+        image = Image.open(data_path)
+        label_img = Image.open(label_path)
+        mask = np.asarray(Image.open(mask_path))
+        # increase contrast of image
+        if self.args.contrast:
+            image = ImageEnhance.Contrast(image).enhance(2)
+        image_arr = np.asarray(image)
+        label_arr = np.asarray(label_img)
+        
+        if (image_arr.ndim == 2):
+            image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
+        if (label_arr.ndim == 2):
+            label_arr = np.repeat(label_arr[..., np.newaxis], 3, -1)
+
+        seed = np.random.randint(2147483647) 
+        random.seed(seed) 
+        torch.manual_seed(seed)
+        image_tensor = self.transform(image_arr)
+        torch.manual_seed(seed)
+        mask_tensor = self.transform_mask(mask)
+        torch.manual_seed(seed)
+        label_tensor = self.transform_mask(label_arr)
+        # vutils.save_image(label_tensor, 'waht3.png', normalize=False, scale_each=True)
+        # import pdb; pdb.set_trace()
+        
+        # back: 0, ped: 128, srf: 191, retinal: 255
+        l = {'SRF': 0, 'PED': 0, 'lesion': 0, 'health': 0, 'BackGround': 1}
+        labels = np.unique(label_arr)
+        if len(labels) == 1:
+            l['health'] += 1
+        if 128 in labels:
+            l['PED'] += 1
+        if 191 in labels:
+            l['SRF'] += 1
+        if 255 in labels:
+            l['lesion'] +=1 
+
+        return {'image': image_tensor, 'labels': torch.FloatTensor([l[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor,'annot': label_tensor}
+
+    def __len__(self):
+        return len(self.file_list[self.data_type])
+
+class DukeDataset(Dataset):
+    # dict_keys(['__header__', '__version__', '__globals__', 'images', 'automaticFluidDME', 'manualFluid1', 'manualFluid2', 'automaticLayersDME', 'automaticLayersNormal', 'manualLayers1', 'manualLayers2'])
+    def __init__(self, args, data_type, infer_list=[]):
+        self.file_list = {'train': glob.glob("{}/train/original_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/original_images/*".format(args.root_dirs))}
+        self.mask_list = {'train': glob.glob("{}/train/*".format(args.mask_dir)), 'test': glob.glob("{}/valid/*".format(args.mask_dir))}
         if data_type == 'inference':
             self.file_list = {'inference': ["{}/valid/original_images/{}".format(args.root_dirs, item) for item in infer_list]}
             self.mask_list = {'inference': ["{}/valid/{}".format(args.mask_dir, item) for item in infer_list]}
@@ -123,6 +191,7 @@ class RESCDataset(Dataset):
         mask_tensor = self.transform_mask(mask)
         torch.manual_seed(seed)
         label_tensor = self.transform_mask(label_arr)
+        import pdb; pdb.set_trace()
         # vutils.save_image(label_tensor, 'waht3.png', normalize=False, scale_each=True)
         
         # back: 0, ped: 128, srf: 191, retinal: 255
@@ -131,17 +200,15 @@ class RESCDataset(Dataset):
         if len(labels) == 1:
             l['health'] += 1
         if 128 in labels:
-            l['ped'] += 1
+            l['PED'] += 1
         if 191 in labels:
-            l['srf'] += 1
+            l['SRF'] += 1
         if 255 in labels:
             l['lesion'] +=1 
 
-        return {'image': image_tensor, 'labels': torch.FloatTensor([l[x] for x in RESCLabels]), 'path': data_path, 'mask': mask_tensor,'annot': label_tensor}
-
+        return {'image': image_tensor, 'labels': torch.FloatTensor([l[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor,'annot': label_tensor}
     def __len__(self):
         return len(self.file_list[self.data_type])
-
  
 def train_transform(is_size, is_mask):
     inter = Image.NEAREST if is_mask else Image.BILINEAR
@@ -200,10 +267,15 @@ if __name__ == "__main__":
             self.contrast = False
             self.is_size = (256, 256)
     args = Args()
-    resc_dataset = RESCDataset(args, 'test')
-    l = {'srf': 0, 'ped': 0, 'retinal': 0, 'health': 0}
-    for idx in range(0, len(resc_dataset)):
-        res = resc_dataset[idx]
-        print(res)
-        import pdb; pdb.set_trace()
+    # resc_dataset = RESCDataset(args, 'test')
+    # l = {'srf': 0, 'ped': 0, 'retinal': 0, 'health': 0}
+    # for idx in range(0, len(resc_dataset)):
+    #     res = resc_dataset[idx]
+    #     print(res)
+    #     import pdb; pdb.set_trace()
+    
+    duke_dataset = DukeDataset(args, 'test')
+    
 
+
+# %%

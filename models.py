@@ -83,7 +83,9 @@ class CAM_Net(nn.Module):
 
     def forward(self, x):
         x = self.multi_task_model(x)
+        print(x.shape)
         max_x = self.maxpool(x)
+        print(max_x.shape)
         max_x = max_x.view(max_x.size(0), -1)
         fc_x = self.fc(max_x)
         return self.sigmoid(fc_x)

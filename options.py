@@ -32,14 +32,14 @@ class Configs():
         self.parser.add_argument("--w_ce", type=float, default=1, help="Cross Entropy loss weight")
         self.parser.add_argument("--w_dice", type=float, default=0, help="Dice loss weight")
         self.parser.add_argument("--n_epochs", type=int, default=50, help="Number of training epochs")
-        self.parser.add_argument("--refine_epoch_point", type=int, default=35, help="The start epoch for refine input by cam")
+        self.parser.add_argument("--refine_epoch_point", type=int, default=135, help="The start epoch for refine input by cam")
         
         self.parser.add_argument("--train_batch_size", type=int,default=8, help="Batch size for training")
         self.parser.add_argument("--valid_batch_size", type=int,default=1, help="Batch size for validation")
         self.parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
         self.parser.add_argument("--lr_schedule", type=dict, default={'step': 10, 'gamma': 0.5}, help="Learning rate decay step and gamma")
         
-        self.parser.add_argument("--check_point", type=str, default="outputs/original_gan_blg_refine_byProb", help="Path of the pre-trained Network")
+        self.parser.add_argument("--check_point", type=str, default="outputs/RESC/resc_orig_gan", help="Path of the pre-trained Network")
         self.parser.add_argument("--continue_train", type=bool, default=False, help="Continue train")
         self.parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
         self.parser.add_argument("--cam_type", type=str, default="gradcam", help="GradCAM")
@@ -57,18 +57,18 @@ class Configs():
         self.parser.add_argument("--n_refine_background", type=int, default=0, help="Number of background only refinement")
     def parse(self):
         args = self.parser.parse_args()
-        file_name = os.path.join(args.save_folder, 'opt.txt')
-        if not os.path.exists(args.save_folder):
-            os.makedirs(args.save_folder)
-        with open(file_name, 'wt') as opt_file:
-            opt_file.write('------------ Options -------------\n')
-            for k, v in sorted(vars(args).items()):
-                opt_file.write('%s: %s\n' % (str(k), str(v)))
-            opt_file.write('-------------- End ----------------\n')
+        # file_name = os.path.join(args.save_folder, 'opt.txt')
+        # if not os.path.exists(args.save_folder):
+        #     os.makedirs(args.save_folder)
+        # with open(file_name, 'wt') as opt_file:
+        #     opt_file.write('------------ Options -------------\n')
+        #     for k, v in sorted(vars(args).items()):
+        #         opt_file.write('%s: %s\n' % (str(k), str(v)))
+        #     opt_file.write('-------------- End ----------------\n')
         return args
    
-    def get_labels(self, type='ours'):
-        if type == 'resc':
+    def get_labels(self):
+        if 'RESC' in self.parser.parse_args().root_dirs:
             return self.parser.parse_args().resc_labels
         return self.parser.parse_args().labels
         
