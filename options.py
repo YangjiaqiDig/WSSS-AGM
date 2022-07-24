@@ -19,8 +19,8 @@ class Configs():
 
     def __init__(self):
         self.parser = argparse.ArgumentParser()
-        self.parser.add_argument("--root_dirs", type=str, default="RESC", help="root datasets directory")
-        self.parser.add_argument("--mask_dir", type=str, default="RESC/mask", help="Retinal mask datasets directory")
+        self.parser.add_argument("--root_dirs", type=str, default="datasets/RESC", help="root datasets directory")
+        self.parser.add_argument("--mask_dir", type=str, default="datasets/RESC/mask", help="Retinal mask datasets directory")
         self.parser.add_argument("--save_folder", type=str, default="outputs/RESC/resc_orig_gan", help="Path or url of the dataset")
         self.parser.add_argument("--labels", type=str, default=['SRF', 'IRF', 'EZ', 'HRD', 'BackGround'], help="['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround', 'EZ attenuated', 'EZ disrupted', 'Retinal Traction', 'Definite DRIL']")
         self.parser.add_argument("--resc_labels", type=str, default=['SRF', 'PED', 'BackGround'], help="['SRF', 'PED', 'LESION', 'BackGround']")        
@@ -43,7 +43,7 @@ class Configs():
         self.parser.add_argument("--continue_train", type=bool, default=False, help="Continue train")
         self.parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
         self.parser.add_argument("--cam_type", type=str, default="gradcam", help="GradCAM")
-        self.parser.add_argument("--backbone", type=str, default="resnet18", help="resnet18, resnet50, resnet101, vgg16")
+        self.parser.add_argument("--backbone", type=str, default="resnet18", help="resnet18, resnet38, resnet50, resnet101, vgg16")
         self.parser.add_argument("--model_gan", type=str, default='pretrained/gan/regular/best', help="Pretrained GAN Model path")
         
         self.parser.add_argument("--combine_ez", type=bool, default=True, help="If combine ez two conditions")

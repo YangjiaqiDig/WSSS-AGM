@@ -17,7 +17,7 @@ def filter_noise():
         img_path = os.path.join('/ssd1/jiaqi/retinal_project/examples/ganomaly/anomaly_dme_rescale', '{}'.format(filename))
         image = Image.open(img_path)
         
-        # orig_path = os.path.join('our_dataset/test/1.abnormal', '{}'.format(filename))
+        # orig_path = os.path.join('datasets/our_dataset/test/1.abnormal', '{}'.format(filename))
         # orig = Image.open(orig_path)
         # r, g, b = image.split()
         # b[b<255] =0
@@ -178,7 +178,7 @@ def generate_background_mask(image_path):
     return mask#dst
 
 def remove_background():
-    imgs_dirs = glob.glob("our_dataset/dataset_DME/4/images/*")#
+    imgs_dirs = glob.glob("datasets/our_dataset/dataset_DME/4/images/*")#
     count = 0
     for img_dir in imgs_dirs:
         img_name = img_dir.split('/')[-1]
@@ -218,14 +218,14 @@ def remove_background():
                 output[labels == max_label] = 0
             # print(max_label)
             # print(output.shape)
-            cv.imwrite('our_dataset/dataset_DME/4/images_backrm/{}'.format(img_name), output)
+            cv.imwrite('datasets/our_dataset/dataset_DME/4/images_backrm/{}'.format(img_name), output)
         # output[output >= 240] = 0
         # cv.imwrite('test.png', output)
     print(count)
     return;
 
 def random_seperate_test():
-    labels_table = pd.read_csv('our_dataset/labels.csv')
+    labels_table = pd.read_csv('datasets/our_dataset/labels.csv')
     labels_table['EZ'] = (labels_table['EZ attenuated'] + labels_table['EZ disrupted'])
     labels_table['patient'] = labels_table['img'].apply(lambda row: '-'.join(row.split('-')[:2])) 
     
@@ -237,18 +237,18 @@ def random_seperate_test():
     print(combined_df.iloc[:30])
 #3882196|3565572|4240465|224974|2205167|3491563|DR91|DR10
 
-def generate_mask_our_dataset():
-    list_of_data = glob.glob("our_dataset/original/train/*")
+def generate_mask_datasets/our_dataset():
+    list_of_data = glob.glob("datasets/our_dataset/original/train/*")
     for item in list_of_data:
         image_name = item.split('/')[-1].split('.')[0]
         res = generate_background_mask(item)
-        cv.imwrite('our_dataset/mask/train/{}.png'.format(image_name), res)
+        cv.imwrite('datasets/our_dataset/mask/train/{}.png'.format(image_name), res)
 
-    list_of_test = glob.glob("our_dataset/original/test/*")
+    list_of_test = glob.glob("datasets/our_dataset/original/test/*")
     for item in list_of_test:
         image_name = item.split('/')[-1].split('.')[0]
         res = generate_background_mask(item)
-        cv.imwrite('our_dataset/mask/test/{}.png'.format(image_name), res)
+        cv.imwrite('datasets/our_dataset/mask/test/{}.png'.format(image_name), res)
 
 def generate_mask_resc():
     list_of_data = glob.glob("RESC/train/original_images/*")

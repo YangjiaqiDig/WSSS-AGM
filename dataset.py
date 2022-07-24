@@ -19,7 +19,7 @@ class OCTDataset(Dataset):
         if data_type == 'inference':
             self.file_list = {'inference': ["{}/test/{}".format(args.root_dirs, item) for item in infer_list]}
             self.mask_list = {'inference': ["{}/test/{}.png".format(args.mask_dir, item.split('.')[0]) for item in infer_list]}
-        self.labels_table = pd.read_csv("our_dataset/labels.csv")
+        self.labels_table = pd.read_csv("datasets/our_dataset/labels.csv")
         if args.combine_ez:
             self.labels_table['EZ'] = self.labels_table['EZ attenuated'] + self.labels_table['EZ disrupted']
             self.labels_table.loc[self.labels_table['EZ'] > 1, 'EZ'] = 1
@@ -67,8 +67,8 @@ class OCTDataset(Dataset):
         
         # if self.input_structure:
         #     # not re-generate structure for background removal
-        #     str_image_gan = Image.open('our_dataset/structures/gan/{}'.format(image_name))
-        #     str_image_orig = Image.open('our_dataset/structures/original/{}'.format(image_name))
+        #     str_image_gan = Image.open('datasets/our_dataset/structures/gan/{}'.format(image_name))
+        #     str_image_orig = Image.open('datasets/our_dataset/structures/original/{}'.format(image_name))
         #     str_tensor_gan, str_tensor_orig = self.transform_val(np.asarray(str_image_gan)), self.transform_val(np.asarray(str_image_orig))
         #     image_tensor = torch.cat((image_tensor, str_tensor_orig, str_tensor_gan))
         try:
@@ -235,12 +235,12 @@ def valid_transform(is_size, is_mask):
     return transform_seq
 
 if __name__ == "__main__":
-    # root_dirs = ["our_dataset/original/DME_1", "our_dataset/original/DME_2", "our_dataset/original/DME_3", "our_dataset/original/DME_4", "our_dataset/original/DR"]
+    # root_dirs = ["datasets/our_dataset/original/DME_1", "datasets/our_dataset/original/DME_2", "datasets/our_dataset/original/DME_3", "datasets/our_dataset/original/DME_4", "datasets/our_dataset/original/DR"]
     # labels_table = []
     # for root_dir in root_dirs:
     #     labels_table.append(pd.read_csv("%s/labels.csv" % root_dir)) 
     # labels_table = pd.concat(labels_table, ignore_index=True)
-    # labels_table.to_csv('our_dataset/labels.csv', index=False)
+    # labels_table.to_csv('datasets/our_dataset/labels.csv', index=False)
     # print(labels_table)
 
     # dataset = OCTDataset(root_dirs, transform=valid_transform())

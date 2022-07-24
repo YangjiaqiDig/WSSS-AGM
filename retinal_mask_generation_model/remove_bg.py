@@ -15,10 +15,10 @@ DEVICE_NR = '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 
 
-class OUR_DATASET(Dataset): 
+class datasets/our_dataset(Dataset): 
     def __init__(self, data_type):
-        train_normal = glob.glob("our_dataset/original/train/NORMAL*") + glob.glob("oct_kaggle/train/0.normal/NORMAL*")
-        self.file_list = {'train': train_normal, 'test': glob.glob("our_dataset/original/test/*")}
+        train_normal = glob.glob("datasets/our_dataset/original/train/NORMAL*") + glob.glob("oct_kaggle/train/0.normal/NORMAL*")
+        self.file_list = {'train': train_normal, 'test': glob.glob("datasets/our_dataset/original/test/*")}
         self.data_type = data_type
         self.transform_train = transforms.Compose([
                 transforms.ToPILImage(),
@@ -65,8 +65,8 @@ def save_models(epoch, model, optimizer):
         'optimizer': optimizer.state_dict(),
     }, save_path + "/{0}.pwf".format(epoch + 1))     
     
-dataset_train = OUR_DATASET(data_type='train')
-dataset_test = OUR_DATASET(data_type='test')
+dataset_train = datasets/our_dataset(data_type='train')
+dataset_test = datasets/our_dataset(data_type='test')
 trainloader = torch.utils.data.DataLoader(
                         dataset_train, 
                         num_workers=8,

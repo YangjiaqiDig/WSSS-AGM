@@ -21,7 +21,7 @@ runs/*
 # dataset ignore
 deprecated.zip
 oct_kaggle/
-our_dataset/
+datasets/our_dataset/
 OCT-Segmentation/
 RESC/
 mvtec/
