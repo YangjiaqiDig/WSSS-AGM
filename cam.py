@@ -1,7 +1,7 @@
 from turtle import pd
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, GuidedBackpropReLUModel
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-from test import SegmentationMetric
+from metrics import SegmentationMetric
 import torch
 import os
 import numpy as np
@@ -83,15 +83,29 @@ def save_cam_during_train(params, cam):
                 print(save_class_name, im_h)
                 import pdb; pdb.set_trace()
 
+
+def convert_resc_labels(img):
+    # 0 background, 
+    # 1 lesion(need turn to background),  1 -> 0
+    # 0.74 SRF(need turn to 1),           0.74 -> 1
+    # 0.51 PED(need turn to 2)            0.51 -> 2
+    img[img == 1] = 0
+    img[img > 0.7] = 1
+    img[(img < 0.7) & (img > 0.4)] = 2
+    return img.numpy()
+
 def save_cam_for_inference(params, cam):
     args, inputs, batch_preds, updated_image, model = params['args'], params['inputs'], params['batch_preds'], params['refined'], params['model']
     is_background_include = 'BackGround'in OrgLabels
     # softmax = nn.Softmax()
-    metric = SegmentationMetric(3)
+    # metric = SegmentationMetric(3)
     ready_pred_4d = []
+    gt = []
     for i, pred in enumerate(batch_preds):
         orig_image = inputs["image"][i][0].clone()
         orig_mask = inputs['mask'][i][0].clone()
+        mask_clone = orig_mask.clone()
+        mask_clone[mask_clone == 0] = 0.5
         rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
         img_path = inputs["path"][i].split('/')[-1]
         save_path = os.path.join(args.save_inference, '{}'.format(img_path.split('.')[0]))
@@ -107,33 +121,31 @@ def save_cam_for_inference(params, cam):
             save_img = torch.cat([save_img, inputs["annot"][i].reshape(-1,3,w, h).to(args.device)], 0)
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True)
         # print(pred)
+        all_grey = [np.zeros((w, h))] * (len(OrgLabels) + 1) # resc = 4 length
         pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
         if is_background_include and len(pred_classes)==1 and OrgLabels.index('BackGround') == true_classes[0]:
             continue
         save_cam_in_row = []
         save_class_name = ''
-        
-        all_grey = [np.zeros((w, h))] * (len(OrgLabels) + 1)
+        gt.append(convert_resc_labels(inputs["annot"][i,0].clone()))
         for cls in pred_classes:
             targets = [ClassifierOutputTarget(cls)]
             grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=True) #(h,w)
             grayscale_cam = grayscale_cam[0, :]
             grey_thred = grayscale_cam.copy()
-            
-            mask_clone = orig_mask.clone()
-            mask_clone[mask_clone == 0] = 0.5
             grey_thred = grey_thred * mask_clone.cpu().numpy()
-            grey_thred[grey_thred < 0.3] = 0  # (h, w)
+            # grey_thred[grey_thred < 0.3] = 0  # (h, w)
             
             # gb_model = GuidedBackpropReLUModel(model=model, use_cuda='cuda')
             # gb = gb_model(updated_image, target_category=cls)[:,:,:3]
             # cam_mask = cv2.merge([grayscale_cam, grayscale_cam, grayscale_cam])
             # cam_gb = deprocess_image(cam_mask * gb)
             # gb = deprocess_image(gb)
+            
             strict_grey = grey_thred.copy()
-            if OrgLabels[cls] in ['IRF', 'SRF', 'PED']:
-                strict_grey[orig_image > 0.15] = 0 #keep bubble region (dark) #| (orig_mask == 0)
-            else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
+            # if OrgLabels[cls] in ['IRF', 'SRF', 'PED']:
+            #     strict_grey[orig_image > 0.15] = 0 #keep bubble region (dark) #| (orig_mask == 0)
+            # else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
             
             
             # cv2.imwrite('test{0}.jpg'.format(cls), strict_grey * 255)
@@ -146,8 +158,9 @@ def save_cam_for_inference(params, cam):
             save_cam_in_row.append(cam_image)
             save_class_name =  save_class_name + '_' + OrgLabels[cls]
 
-        ready_pred_4d.append(np.array(all_grey)[:-1])
-        labels = np.argmax(np.array(all_grey), axis=0)
+        # ready_pred_4d.append(np.array(all_grey)[:-1])
+        labels = np.argmax(np.array(all_grey), axis=0) # only return the first concurent for same values
+        ready_pred_4d.append(labels)
         color_mask = np.zeros((w, h, 3))
         for i in range(1, len(OrgLabels) + 1):
             mask = labels == i
@@ -166,20 +179,14 @@ def save_cam_for_inference(params, cam):
             except:
                 print(save_class_name, im_h)
                 import pdb; pdb.set_trace()
-    ready_pred_4d = torch.tensor(np.array(ready_pred_4d))
-    gt = inputs["annot"][:,0].clone()
-    gt[gt == 1] = 0
-    gt[gt > 0] = 1
-    metric.update(ready_pred_4d, gt)
-    print(metric.get())
-    import pdb; pdb.set_trace()
+
+    return gt, ready_pred_4d
                
 def save_cam_results(params, is_inference=False):
     cam = params['cam']
     # batch_preds [BC] B: batch, C: Class
     if is_inference:
-        save_cam_for_inference(params, cam)
-        return
+        return save_cam_for_inference(params, cam)
     save_cam_during_train(params, cam)
 
 '''

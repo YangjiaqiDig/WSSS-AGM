@@ -22,7 +22,8 @@ from gan_inference import load_gan_model
 from dataset import (OCTDataset, RESCDataset)
 from cam import save_cam_results, refine_input_by_cam, get_pseudo_label
 from models import MultiTaskModel, CAM_Net, U_Net
-from utils import OrgLabels, calculate_metrics, calculate_roc, save_models, save_tensorboard
+from utils import OrgLabels, save_models, save_tensorboard
+from metrics import calculate_classification_metrics, calculate_roc
 from options import Configs
 
 
@@ -150,7 +151,7 @@ class Train():
             #     if self.args.continue_train or (epoch + 1) > self.args.refine_epoch_point:  
                 combined_loss = self.cam_loss(outputs, labels)
                 total_loss_val += combined_loss.cpu().item()
-                batch_accuracies_metrics = calculate_metrics(outputs, labels)
+                batch_accuracies_metrics = calculate_classification_metrics(outputs, labels)
                 total_acc_val += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
                 pred_list = torch.cat((pred_list, outputs))
@@ -203,7 +204,7 @@ class Train():
                 total_seg_loss += segmentation_loss.cpu().item()
             with torch.no_grad():
                 total_loss += combined_loss.cpu().item()
-                batch_accuracies_metrics = calculate_metrics(outputs, labels)
+                batch_accuracies_metrics = calculate_classification_metrics(outputs, labels)
                 total_acc += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
                 pred_list = torch.cat((pred_list, outputs))
@@ -274,6 +275,7 @@ class Train():
         self.cam_model.eval()
         
         cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=self.target_layers)
+        gt_list, cam_list = [], []
         for batch, data in tqdm(enumerate(dataloader), total=len(dataloader)):
             image, labels = data["image"].to(self.device), data["labels"].to(self.device)        
             updated_image = image.clone()
@@ -284,12 +286,21 @@ class Train():
             outputs = self.cam_model(updated_image)
             # maybe only for args.n_epochs in first condition
             params = {'args': self.args, 'cam': cam, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image, 'model':  self.cam_model}
-            save_cam_results(params, is_inference=True)
-
+            gt_res, pred_res = save_cam_results(params, is_inference=True)
+            gt_list += gt_res
+            cam_list += pred_res
+        # print(len(gt_list))
+        # import pdb; pdb.set_trace()
+        from metrics import scores, record_score
+        score = scores(gt_list, cam_list, n_class=3)
+        print(score)
+        record_score(score, 'resc', 'cls2')
+        
 if __name__ == "__main__":
     trainer = Train(is_inference=True)
     # trainer.train()
-    trainer.inference(infer_list=['sn22698_97.bmp'])
+    trainer.inference()
+    # trainer.inference(infer_list=['sn22698_97.bmp','sn3502_1.bmp'])
     # trainer.inference(infer_list=['DME-15307-1.jpeg',
     #                               'DME-4240465-41.jpeg', 
     #                               'DR10.jpeg',
