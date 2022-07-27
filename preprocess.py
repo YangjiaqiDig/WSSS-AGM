@@ -1,13 +1,9 @@
-from itertools import count
-import shutil
 import os, glob
 from PIL import Image, ImageFilter, ImageEnhance
 import numpy as np
 import matplotlib.pyplot as plt
 # from medpy.filter.smoothing import anisotropic_diffusion
 import cv2 as cv
-
-import torchvision.utils as vutils
 
 import pandas as pd
 
@@ -237,7 +233,7 @@ def random_seperate_test():
     print(combined_df.iloc[:30])
 #3882196|3565572|4240465|224974|2205167|3491563|DR91|DR10
 
-def generate_mask_datasets/our_dataset():
+def generate_mask_datasets():
     list_of_data = glob.glob("datasets/our_dataset/original/train/*")
     for item in list_of_data:
         image_name = item.split('/')[-1].split('.')[0]

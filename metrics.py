@@ -3,18 +3,10 @@ import torch
 import numpy as np
 import os
 from sklearn.metrics import accuracy_score, f1_score, classification_report, roc_auc_score
-from utils import OrgLabels
+from utils import OrgLabels, type_color
 from PIL import Image
 
-type_color = {
-    0: [0, 0, 0], # black
-    1: [255, 0, 0], # srf red
-    2: [0, 255, 0], # irf green
-    3: [0, 0, 255], # ez blue
-    4: [255, 255, 0], # hrd yellow
-    5: [255, 165, 0], # rpe orange
-    6: [255, 0, 255] # back ground pink
-}
+
 # 0.8247863247863247 0.7519246396739377 0.8247863247863247
 # 0.8301282051282052 0.7603308530659053 0.8301282051282052
 def calculate_classification_metrics(outputs, labels):

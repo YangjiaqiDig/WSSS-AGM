@@ -10,12 +10,11 @@ import torchvision.utils as vutils
 from tqdm import tqdm
 import cv2
 
-from unet import U_Net
+from retinal_mask_generation_model.unet import U_Net
 DEVICE_NR = '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 
-
-class datasets/our_dataset(Dataset): 
+class OurDataset(Dataset): 
     def __init__(self, data_type):
         train_normal = glob.glob("datasets/our_dataset/original/train/NORMAL*") + glob.glob("oct_kaggle/train/0.normal/NORMAL*")
         self.file_list = {'train': train_normal, 'test': glob.glob("datasets/our_dataset/original/test/*")}
@@ -65,8 +64,8 @@ def save_models(epoch, model, optimizer):
         'optimizer': optimizer.state_dict(),
     }, save_path + "/{0}.pwf".format(epoch + 1))     
     
-dataset_train = datasets/our_dataset(data_type='train')
-dataset_test = datasets/our_dataset(data_type='test')
+dataset_train = OurDataset(data_type='train')
+dataset_test = OurDataset(data_type='test')
 trainloader = torch.utils.data.DataLoader(
                         dataset_train, 
                         num_workers=8,

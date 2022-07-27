@@ -2,7 +2,6 @@ import logging
 import os
 import time
 from collections import Counter
-from turtle import pd
 
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, GuidedBackpropReLUModel
 import torch
@@ -20,9 +19,9 @@ logging.basicConfig(level=logging.DEBUG)
 
 from gan_inference import load_gan_model
 from dataset import (OCTDataset, RESCDataset)
-from cam import save_cam_results, refine_input_by_cam, get_pseudo_label
+from refine_pseudo_label import refine_input_by_cam, get_pseudo_label
 from models import MultiTaskModel, CAM_Net, U_Net
-from utils import OrgLabels, save_models, save_tensorboard
+from utils import OrgLabels, save_models, save_tensorboard, save_cam_results
 from metrics import calculate_classification_metrics, calculate_roc
 from options import Configs
 
