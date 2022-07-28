@@ -86,6 +86,7 @@ def scores(label_trues, label_preds, n_class):
     freq = hist.sum(axis=1) / hist.sum()
     fwavacc = (freq[freq > 0] * iu[freq > 0]).sum()
     cls_iu = dict(zip(range(n_class), iu))
+    # import pdb; pdb.set_trace()
 
     return {
         "Pixel Accuracy": acc,
@@ -106,7 +107,8 @@ def record_score(score, save_path, iou_type):
             print('class {:2d} {:12} IU {:.2f}'.format(num, CAT_LIST[num], round(cls_iou, 3)))
             f.write('class {:2d} {:12} IU {:.2f}'.format(num, CAT_LIST[num], round(cls_iou, 3)) + '\n')
         print('meanIOU: ' + str(aveJ) + '\n')
-        f.write('meanIOU: ' + str(aveJ) + '\n')       
+        f.write('meanIOU: ' + str(aveJ) + '\n')    
+        f.write('pixelAcc: ' + str(score['Pixel Accuracy']) + '\n' + 'meanAcc: ' + str(score['Mean Accuracy']) + '\n') 
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image, \
     preprocess_image
 import torchvision.models as models
 import torchvision.utils as vutils
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
 type_color = {
     0: [0, 0, 0], # black
@@ -30,6 +31,18 @@ def convert_resc_labels(img):
     img[img > 0.7] = 1
     img[(img < 0.7) & (img > 0.4)] = 2
     return img.numpy()
+
+def post_process_cam(cls, grayscale_cam, orig_mask, orig_image):
+    grey_thred = grayscale_cam.copy()
+    mask_clone = orig_mask.clone() # NEUROSENSORY RETINA only (ILM to RPE)
+    mask_clone[mask_clone == 0] = 0.5
+    grey_thred = grey_thred * mask_clone.cpu().numpy()
+    grey_thred[grey_thred < 0.3] = 0  # (h, w)
+    
+    # if OrgLabels[cls] in ['IRF', 'SRF', 'PED']:
+    #     grey_thred[orig_image > 0.15] = 0 #keep bubble region (dark) #| (orig_mask == 0)
+    # elif OrgLabels[cls] == 'EZ': grey_thred[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
+    return grey_thred
 
 def save_cam_during_train(params, cam):
     args, epoch, inputs, batch_preds, updated_image = params['args'], params['epoch'], params['inputs'], params['batch_preds'], params['refined']
@@ -99,17 +112,18 @@ def save_cam_during_train(params, cam):
                 import pdb; pdb.set_trace()
 
 def save_cam_for_inference(params, cam):
-    args, inputs, batch_preds, updated_image, model = params['args'], params['inputs'], params['batch_preds'], params['refined'], params['model']
-    is_background_include = 'BackGround'in OrgLabels
-    # softmax = nn.Softmax()
-    # metric = SegmentationMetric(3)
+    args, inputs, batch_preds, updated_image = params['args'], params['inputs'], params['batch_preds'], params['refined']
+    non_background_names = [x for x in OrgLabels if 'BackGround' != x]
+    lesion_classes = [OrgLabels.index(name) for name in non_background_names]
     ready_pred_4d = []
     gt = []
     for i, pred in enumerate(batch_preds):
-        orig_image = inputs["image"][i][0].clone()
+        ground_true_classes = [i for i,v in enumerate(inputs['labels'][i]) if v > 0.5]
+        # only calculate and save for ground truth lesion images
+        if not len(set(lesion_classes) & set(ground_true_classes)):
+            continue
+        orig_image = inputs['image'][i][0]
         orig_mask = inputs['mask'][i][0].clone()
-        mask_clone = orig_mask.clone()
-        mask_clone[mask_clone == 0] = 0.5
         rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
         img_path = inputs["path"][i].split('/')[-1]
         save_path = os.path.join(args.save_inference, '{}'.format(img_path.split('.')[0]))
@@ -124,11 +138,8 @@ def save_cam_for_inference(params, cam):
         if 'annot' in inputs:
             save_img = torch.cat([save_img, inputs["annot"][i].reshape(-1,3,w, h).to(args.device)], 0)
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True)
-        # print(pred)
         all_grey = [np.zeros((w, h))] * (len(OrgLabels) + 1) # resc = 4 length
         pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
-        if is_background_include and len(pred_classes)==1 and OrgLabels.index('BackGround') == true_classes[0]:
-            continue
         save_cam_in_row = []
         save_class_name = ''
         gt.append(convert_resc_labels(inputs["annot"][i,0].clone()))
@@ -136,33 +147,15 @@ def save_cam_for_inference(params, cam):
             targets = [ClassifierOutputTarget(cls)]
             grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=True) #(h,w)
             grayscale_cam = grayscale_cam[0, :]
-            grey_thred = grayscale_cam.copy()
-            grey_thred = grey_thred * mask_clone.cpu().numpy()
-            # grey_thred[grey_thred < 0.3] = 0  # (h, w)
+            grey_thred = post_process_cam(cls, grayscale_cam, orig_mask, orig_image)
             
-            # gb_model = GuidedBackpropReLUModel(model=model, use_cuda='cuda')
-            # gb = gb_model(updated_image, target_category=cls)[:,:,:3]
-            # cam_mask = cv2.merge([grayscale_cam, grayscale_cam, grayscale_cam])
-            # cam_gb = deprocess_image(cam_mask * gb)
-            # gb = deprocess_image(gb)
-            
-            strict_grey = grey_thred.copy()
-            # if OrgLabels[cls] in ['IRF', 'SRF', 'PED']:
-            #     strict_grey[orig_image > 0.15] = 0 #keep bubble region (dark) #| (orig_mask == 0)
-            # else: strict_grey[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
-            
-            
-            # cv2.imwrite('test{0}.jpg'.format(cls), strict_grey * 255)
-            # cv2.imwrite('test_b{0}.jpg'.format(cls), grey_thred * 255)
-            # cv2.imwrite('test_or{0}.jpg'.format(cls), grayscale_cam * 255)
             if OrgLabels[cls] != 'BackGround':
-                all_grey[cls + 1] = strict_grey
+                all_grey[cls + 1] = grey_thred
             visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
             cam_image = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
             save_cam_in_row.append(cam_image)
             save_class_name =  save_class_name + '_' + OrgLabels[cls]
 
-        # ready_pred_4d.append(np.array(all_grey)[:-1])
         labels = np.argmax(np.array(all_grey), axis=0) # only return the first concurent for same values
         ready_pred_4d.append(labels)
         color_mask = np.zeros((w, h, 3))

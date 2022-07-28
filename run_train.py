@@ -288,7 +288,7 @@ class Train():
             gt_res, pred_res = save_cam_results(params, is_inference=True)
             gt_list += gt_res
             cam_list += pred_res
-        # print(len(gt_list))
+
         # import pdb; pdb.set_trace()
         from metrics import scores, record_score
         score = scores(gt_list, cam_list, n_class=3)
