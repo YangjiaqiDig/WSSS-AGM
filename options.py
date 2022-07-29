@@ -19,11 +19,12 @@ class Configs():
 
     def __init__(self):
         self.parser = argparse.ArgumentParser()
-        self.parser.add_argument("--root_dirs", type=str, default="datasets/our_dataset", help="root datasets directory")
+        self.parser.add_argument("--root_dirs", type=str, default="datasets/our_dataset/original", help="root datasets directory")
         self.parser.add_argument("--mask_dir", type=str, default="datasets/our_dataset/mask", help="Retinal mask datasets directory")
         self.parser.add_argument("--save_folder", type=str, default="outputs/our_dataset_512/origin_gan", help="Path or url of the dataset")
         self.parser.add_argument("--labels", type=str, default=['SRF', 'IRF', 'EZ disrupted', 'HRD', 'BackGround'], help="['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround', 'EZ attenuated', 'EZ disrupted', 'Retinal Traction', 'Definite DRIL']")
         self.parser.add_argument("--resc_labels", type=str, default=['SRF', 'PED', 'BackGround'], help="['SRF', 'PED', 'LESION', 'BackGround']")        
+        self.parser.add_argument("--boe_labels", type=str, default=['Fluid', 'BackGround'], help="['SRF', 'PED', 'LESION', 'BackGround']")
         self.parser.add_argument("--contrast", type=bool, default=False, help="Increase contrast of input image")
         self.parser.add_argument("--mask_enhance", type=bool, default=False, help="Mask input image by enhance")
         
@@ -70,5 +71,7 @@ class Configs():
     def get_labels(self):
         if 'RESC' in self.parser.parse_args().root_dirs:
             return self.parser.parse_args().resc_labels
+        if 'BOE' in self.parser.parse_args().root_dirs:
+            return self.parser.parse_args.boe_labels
         return self.parser.parse_args().labels
         

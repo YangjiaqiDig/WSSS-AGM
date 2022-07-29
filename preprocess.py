@@ -247,17 +247,18 @@ def generate_mask_datasets():
         cv.imwrite('datasets/our_dataset/mask/test/{}.png'.format(image_name), res)
 
 def generate_mask_resc():
-    list_of_data = glob.glob("RESC/train/original_images/*")
+    list_of_data = glob.glob("datasets/2015_BOE_Chiu/segment_annotation/images/*")
+    # print(list_of_data)
     for item in list_of_data:
         image_name = item.split('/')[-1]
         res = generate_background_mask(item)
-        cv.imwrite('RESC/mask/train/{}'.format(image_name), res)
+        cv.imwrite('datasets/2015_BOE_Chiu/segment_annotation/mask/{}'.format(image_name), res)
 
-    list_of_test = glob.glob("RESC/valid/original_images/*")
-    for item in list_of_test:
-        image_name = item.split('/')[-1]
-        res = generate_background_mask(item)
-        cv.imwrite('RESC/mask/valid/{}'.format(image_name), res)
+    # list_of_test = glob.glob("RESC/valid/original_images/*")
+    # for item in list_of_test:
+    #     image_name = item.split('/')[-1]
+    #     res = generate_background_mask(item)
+    #     cv.imwrite('RESC/mask/valid/{}'.format(image_name), res)
 
 if __name__ == "__main__":
     # overlap()

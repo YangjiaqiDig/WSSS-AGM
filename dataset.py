@@ -134,8 +134,12 @@ class RESCDataset(Dataset):
         return len(self.file_list[self.data_type])
 
 class DukeDataset(Dataset):
-    # dict_keys(['__header__', '__version__', '__globals__', 'images', 'automaticFluidDME', 'manualFluid1', 'manualFluid2', 'automaticLayersDME', 'automaticLayersNormal', 'manualLayers1', 'manualLayers2'])
     def __init__(self, args, data_type, infer_list=[]):
+        train_from_resc_label_pth = 'baseline_models/SEAM/voc12/resc_cls_labels.npy'
+        train_from_resc_label = np.load(train_from_resc_label_pth, allow_pickle=True)
+        resc_srf_image_name_list = ''
+        print(testt)
+        ss
         self.file_list = {'train': glob.glob("{}/train/original_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/original_images/*".format(args.root_dirs))}
         self.mask_list = {'train': glob.glob("{}/train/*".format(args.mask_dir)), 'test': glob.glob("{}/valid/*".format(args.mask_dir))}
         if data_type == 'inference':

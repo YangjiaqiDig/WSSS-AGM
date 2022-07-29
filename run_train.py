@@ -13,12 +13,12 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-DEVICE_NR = '0'
+DEVICE_NR = '0,1'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 
 from gan_inference import load_gan_model
-from dataset import (OCTDataset, RESCDataset)
+from dataset import (DukeDataset, OCTDataset, RESCDataset)
 from refine_pseudo_label import refine_input_by_cam, get_pseudo_label
 from models import MultiTaskModel, CAM_Net, U_Net
 from utils import OrgLabels, save_models, save_tensorboard, save_cam_results
@@ -64,12 +64,15 @@ class Train():
             print("Number of GPUs: ", torch.cuda.device_count(), "Device Nbr: ", DEVICE_NR)
             
         # torch.manual_seed(42)
-        if 'our_dateset' in self.args.root_dirs:
+        if 'our_dataset' in self.args.root_dirs:
             self.dataset_train = OCTDataset(self.args, data_type='train')
             self.dataset_test = OCTDataset(self.args, data_type='test')
         elif 'RESC' in self.args.root_dirs:
             self.dataset_train = RESCDataset(self.args, data_type='train')
             self.dataset_test = RESCDataset(self.args, data_type='test')
+        elif 'BOE' in self.args.root_dirs:
+            self.dataset_train = DukeDataset(self.args, data_type='train')
+            self.dataset_test = DukeDataset(self.args, data_type='test')
 
         self.backbone = network_class(self.args)
         self.num_class = len(OrgLabels)
@@ -261,10 +264,12 @@ class Train():
         # if not give infer list of image names, then default as infer all testing
         self.args.continue_train = True
         self.train_parameters()
-        if 'our_dateset' in self.args.root_dirs:
+        if 'our_dataset' in self.args.root_dirs:
             curr_dataset = OCTDataset(self.args, data_type='inference', infer_list=infer_list)
         elif 'RESC' in self.args.root_dirs:
             curr_dataset = RESCDataset(self.args, data_type='inference', infer_list=infer_list)
+        elif 'BOE' in self.args.root_dirs:
+            curr_dataset = DukeDataset(self.args, data_type='inference', infer_list=infer_list)
 
         infer_dataset = self.dataset_test if not len(infer_list) else curr_dataset
         dataloader = torch.utils.data.DataLoader(
