@@ -58,7 +58,7 @@ class Train():
     def __init__(self, is_inference=False):
         self.args = Configs().parse()
         if not is_inference:
-            self.tb = SummaryWriter('runs/{}'.format(self.args.save_folder.split('/')[-1]))
+            self.tb = SummaryWriter('runs_512/{}'.format(self.args.save_folder.split('/')[-1]))
         self.device = self.args.device 
         if self.device == "cuda":
             print("Number of GPUs: ", torch.cuda.device_count(), "Device Nbr: ", DEVICE_NR)
@@ -93,8 +93,8 @@ class Train():
     
     def train_parameters(self):
         shared_model = MultiTaskModel(self.backbone, self.num_input_channel)
-        cam_model = CAM_Net(shared_model, self.num_class)
-        seg_model = U_Net(shared_model, self.num_class)
+        cam_model = CAM_Net(shared_model, self.num_class, self.args.backbone)
+        seg_model = U_Net(shared_model, self.num_class, self.args.backbone)
 
         if self.args.continue_train:
             print('Loading pretrained model from checkpoint {0}/weights/best.pwf'.format(self.args.check_point)) 
@@ -144,7 +144,7 @@ class Train():
                 segmentation_loss = self.loss_seg(seg_outputs, pseudo_label.to(self.device))
                 total_seg_loss_val += segmentation_loss.cpu().item()
             params = {'args': self.args, 'epoch': epoch, 'cam': cam, 'inputs': data, 'batch_preds': outputs, 'refined': updated_image}
-            naive_label = save_cam_results(params)  
+            save_cam_results(params)  
                     
             with torch.no_grad():
             #     if self.args.continue_train or (epoch + 1) > self.args.refine_epoch_point:  
@@ -296,9 +296,10 @@ class Train():
         record_score(score, 'resc', 'cls2')
         
 if __name__ == "__main__":
-    trainer = Train(is_inference=True)
-    # trainer.train()
-    trainer.inference()
+    is_inference=False
+    trainer = Train(is_inference)
+    trainer.train()
+    # trainer.inference()
     # trainer.inference(infer_list=['sn22698_97.bmp','sn3502_1.bmp'])
     # trainer.inference(infer_list=['DME-15307-1.jpeg',
     #                               'DME-4240465-41.jpeg', 

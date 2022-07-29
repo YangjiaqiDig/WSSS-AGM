@@ -36,6 +36,7 @@ class OCTDataset(Dataset):
         # self.input_structure = args.input_structure
         self.data_type = data_type
         self.args = args
+        self.normal_label = {'SRF': 0, 'IRF': 0, 'EZ attenuated': 0,  'EZ disrupted': 0,  'HRD': 0,  'RPE': 0,  'Retinal Traction': 0,  'Definite DRIL': 0,  'Questionable DRIL': 0,  'EZ': 0,  'BackGround': 1}
 
     def __getitem__(self, idx):
         data_path = sorted(self.file_list[self.data_type])[idx]
@@ -55,25 +56,13 @@ class OCTDataset(Dataset):
         image_tensor = self.transform(image_arr)
         torch.manual_seed(seed)
         mask_tensor = self.transform_mask(mask)
-        # vutils.save_image(mask_tensor, 'waht2.png', normalize=False, scale_each=True)
-        # after resize, the mask becomes non-binary
-        # mask_tensor[mask_tensor <= 0.5] = 0
-        # mask_tensor[mask_tensor > 0.5] = 1
-        if image_name in self.labels_table['img'].values:
-            labels = self.labels_table.loc[self.labels_table['img'] == image_name]
-        else:
-            normal_label = {'SRF': 0, 'IRF': 0, 'EZ attenuated': 0,  'EZ disrupted': 0,  'HRD': 0,  'RPE': 0,  'Retinal Traction': 0,  'Definite DRIL': 0,  'Questionable DRIL': 0,  'EZ': 0,  'BackGround': 1}
-            return {'image': image_tensor, 'labels': torch.FloatTensor([normal_label[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor}
         
-        # if self.input_structure:
-        #     # not re-generate structure for background removal
-        #     str_image_gan = Image.open('datasets/our_dataset/structures/gan/{}'.format(image_name))
-        #     str_image_orig = Image.open('datasets/our_dataset/structures/original/{}'.format(image_name))
-        #     str_tensor_gan, str_tensor_orig = self.transform_val(np.asarray(str_image_gan)), self.transform_val(np.asarray(str_image_orig))
-        #     image_tensor = torch.cat((image_tensor, str_tensor_orig, str_tensor_gan))
-        try:
-            return {'image': image_tensor, 'labels': torch.FloatTensor([labels[x].to_numpy()[0] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor}
-        except: print("???", data_path, image_tensor.shape, labels)
+        if image_name in self.labels_table['img'].values:
+            labels_df = self.labels_table.loc[self.labels_table['img'] == image_name]
+            labels = torch.FloatTensor([labels_df[x].to_numpy()[0] for x in OrgLabels])
+        else:
+            labels = torch.FloatTensor([self.normal_label[x] for x in OrgLabels])
+        return {'image': image_tensor, 'labels': labels, 'path': data_path, 'mask': mask_tensor}
     def __len__(self):
         return len(self.file_list[self.data_type])
     

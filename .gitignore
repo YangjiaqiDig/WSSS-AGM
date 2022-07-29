@@ -16,7 +16,7 @@ gan_and_str/
 gozde/
 outputs*/
 pretrained/
-runs/*
+runs*
 
 # dataset ignore
 deprecated.zip

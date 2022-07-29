@@ -2,6 +2,11 @@ import torch.nn as nn
 import torchvision.models as models
 import torch
 
+num_channels_fc = {
+    'resnet18': 512,
+    'resnet50': 2048
+}
+
 def double_conv(in_channels, out_channels):
     return nn.Sequential(
         nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, stride=1),
@@ -11,11 +16,11 @@ def double_conv(in_channels, out_channels):
     )
 
 class U_Net(nn.Module):
-    def __init__(self, multi_task_model, num_class):
+    def __init__(self, multi_task_model, num_class, backbone_name='resnet18'):
         super(U_Net, self).__init__()
         self.multi_task_model = multi_task_model
         self.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
-        self.fc = nn.Linear(512, 256 * 256)
+        self.fc = nn.Linear(num_channels_fc[backbone_name], 512 * 512)
         self.dropout = nn.Dropout(0.1)
         
         self.conv1_block = double_conv(1, 32)
@@ -45,7 +50,7 @@ class U_Net(nn.Module):
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.dropout(self.fc(x))
-        x = x.view(x.size(0), 1, 256, 256)
+        x = x.view(x.size(0), 1, 512, 512)
                 
         conv1 = self.conv1_block(x)
         x = self.maxpool(conv1)
@@ -74,18 +79,18 @@ class U_Net(nn.Module):
         return out
 
 class CAM_Net(nn.Module):
-    def __init__(self, multi_task_model, num_class):
+    def __init__(self, multi_task_model, num_class, backbone_name='resnet18'):
         super().__init__()
         self.multi_task_model = multi_task_model
-        self.maxpool = nn.MaxPool2d(kernel_size=7, stride=7, padding=0)
-        self.fc = nn.Linear(512, num_class)
+        self.maxpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))#nn.MaxPool2d(kernel_size=7, stride=7, padding=0)
+        self.fc = nn.Linear(num_channels_fc[backbone_name], num_class) # 512 fore resent18
         self.sigmoid = nn.Sigmoid()  
 
     def forward(self, x):
         x = self.multi_task_model(x)
-        # print(x.shape)
+        # print(x.shape) # b, 2048,16, 16
         max_x = self.maxpool(x)
-        # print(max_x.shape)
+        # print(max_x.shape) # b, 2048, 1, 1
         max_x = max_x.view(max_x.size(0), -1)
         fc_x = self.fc(max_x)
         return self.sigmoid(fc_x)
@@ -102,14 +107,15 @@ class MultiTaskModel(nn.Module):
         return y
 
 if __name__ == "__main__":
-    RES18 = models.resnet18(pretrained=True)
-    shared_model = MultiTaskModel(RES18)
-    input_x = torch.rand(2, 3, 256, 256)
-    cam_model = CAM_Net(shared_model, 5)
+    RESNet = models.resnet50(pretrained=True)
+    print(RESNet)
+    shared_model = MultiTaskModel(RESNet)
+    input_x = torch.rand(2, 3, 512, 512)
+    cam_model = CAM_Net(shared_model, 5, 'resnet50')
     cam_output = cam_model(input_x)
     print(cam_output.shape)
     
-    seg_model = U_Net(shared_model, 5)
+    seg_model = U_Net(shared_model, 5, 'resnet50')
     seg_output = seg_model(input_x)
     print(seg_output.shape)
     
