@@ -55,7 +55,11 @@ def post_process_cam(cls, grayscale_cam, orig_mask, orig_image):
     # elif OrgLabels[cls] == 'EZ': grey_thred[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
     return grey_thred
 
-def get_cam_results_per_class(cam, orig_image, orig_mask, updated_image, pred):
+def get_cam_results_per_class(cam, inputs, updated_image, pred):
+    rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
+
+    orig_image = inputs['image'][i][0]
+    orig_mask = inputs['mask'][i][0].clone()
     save_class_name = ''
     save_cam_in_row = []
     w, h = orig_image.shape[-2], orig_image.shape[-1]
@@ -73,8 +77,17 @@ def get_cam_results_per_class(cam, orig_image, orig_mask, updated_image, pred):
         save_cam_in_row.append(cam_image)
         save_class_name =  save_class_name + '_' + OrgLabels[cls]
 
-    labels = np.argmax(np.array(bg_score), axis=0) # only return the first concurent for same values
-
+    labels = np.argmax(np.array(bg_score), axis=0) # [0 - num_class]
+    
+    color_mask = np.zeros((w, h, 3))
+    for i in range(1, get_num_classes() + 1):
+        mask = labels == i
+        color_mask[:,:,][mask] = type_color[i]
+    color_mask = cv2.cvtColor(color_mask.astype(np.uint8), cv2.COLOR_BGR2RGB)
+    save_cam_in_row.append(color_mask)
+    dst = cv2.addWeighted((rgb_img * 255).astype(np.uint8), 1, color_mask.astype(np.uint8), 0.7, 0)
+    save_cam_in_row.append(dst)
+    
     return save_class_name, save_cam_in_row, labels
 
 def save_cam_during_train(params, cam):
@@ -85,9 +98,7 @@ def save_cam_during_train(params, cam):
         ground_true_classes = [i for i,v in enumerate(inputs['labels'][i]) if v > 0.5]
         # only calculate and save for ground truth lesion images
         if not len(set(lesion_classes) & set(ground_true_classes)):
-            continue
-        
-        rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
+            continue        
         img_path = inputs["path"][i].split('/')[-1]
         save_path = os.path.join(args.save_folder, 'iteration', '{}'.format(img_path.split('.')[0]))
         if not os.path.exists(save_path):
@@ -105,19 +116,7 @@ def save_cam_during_train(params, cam):
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True) # scale_each limit normalize for each independently in batch
         vutils.save_image(save_updated_img, save_path + '/epoch{0}_refined_{1}.jpg'.format(epoch, truth_label), normalize=True, scale_each=True)
 
-        orig_image = inputs["image"][i][0].clone()
-        orig_mask = inputs['mask'][i][0].clone()
-        save_class_name, save_cam_in_row, labels = get_cam_results_per_class(cam, orig_image, orig_mask, updated_image, pred)
-        color_mask = np.zeros((w, h, 3))
-        # there is no leision, so no need show black image
-        for i in range(1, len(OrgLabels) + 1):
-            mask = labels == i
-            color_mask[:,:,][mask] = type_color[i]
-        color_mask = cv2.cvtColor(color_mask.astype(np.uint8), cv2.COLOR_BGR2RGB)
-        save_cam_in_row.append(color_mask)
-        dst = cv2.addWeighted((rgb_img * 255).astype(np.uint8), 1, color_mask.astype(np.uint8), 0.7, 0)
-        save_cam_in_row.append(dst)
-        
+        save_class_name, save_cam_in_row, _ = get_cam_results_per_class(cam, inputs, updated_image, pred)
         if (len(save_cam_in_row)):
             im_h = cv2.hconcat(save_cam_in_row)
             cv2.imwrite(save_path + '/epoch{0}_{1}.jpg'.format(epoch, save_class_name), im_h)
@@ -133,8 +132,6 @@ def save_cam_for_inference(params, cam):
         # only calculate and save for ground truth lesion images
         if not len(set(lesion_classes) & set(ground_true_classes)):
             continue
-        
-        rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
         img_path = inputs["path"][i].split('/')[-1]
         save_path = os.path.join(args.save_inference, '{}'.format(img_path.split('.')[0]))
         if not os.path.exists(save_path):
@@ -148,23 +145,9 @@ def save_cam_for_inference(params, cam):
             save_img = torch.cat([save_img, inputs["annot"][i].reshape(-1,3,w, h).to(args.device)], 0)
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True)
 
-        orig_image = inputs['image'][i][0]
-        orig_mask = inputs['mask'][i][0].clone()
-        save_class_name, save_cam_in_row, labels = get_cam_results_per_class(cam, orig_image, orig_mask, updated_image, pred)
-        
+        save_class_name, save_cam_in_row, labels = get_cam_results_per_class(cam, inputs, updated_image, pred)
         gt.append(convert_resc_labels(inputs["annot"][i,0].clone()))
         ready_pred_4d.append(labels)
-        color_mask = np.zeros((w, h, 3))
-        for i in range(1, len(OrgLabels) + 1):
-            mask = labels == i
-            color_mask[:,:,][mask] = type_color[i]
-        color_mask = cv2.cvtColor(color_mask.astype(np.uint8), cv2.COLOR_BGR2RGB)
-        save_cam_in_row.append(color_mask)
-        
-        dst = cv2.addWeighted((rgb_img * 255).astype(np.uint8), 1, color_mask.astype(np.uint8), 0.7, 0)
-        # overlap_mask = cv2.cvtColor(color_mask.astype(np.uint8), cv2.COLOR_RGB2BGR)
-        save_cam_in_row.append(dst)
-        
         if (len(save_cam_in_row)):
             im_h = cv2.hconcat(save_cam_in_row)
             cv2.imwrite(save_path + '/{0}.jpg'.format(save_class_name), im_h)
@@ -250,11 +233,11 @@ if __name__ == "__main__":
     # find_layer_types_recursive(model, [torch.nn.ReLU])
     target_layers = [model.layer4]
 
-    rgb_img = cv2.imread(args.image_path, 1)[:, :, ::-1]
-    rgb_img = np.float32(rgb_img) / 255
-    input_tensor = preprocess_image(rgb_img,
-                                    mean=[0.485, 0.456, 0.406],
-                                    std=[0.229, 0.224, 0.225])
+    # rgb_img = cv2.imread(args.image_path, 1)[:, :, ::-1]
+    # rgb_img = np.float32(rgb_img) / 255
+    # input_tensor = preprocess_image(rgb_img,
+    #                                 mean=[0.485, 0.456, 0.406],
+    #                                 std=[0.229, 0.224, 0.225])
 
 
     # We have to specify the target we want to generate
@@ -266,34 +249,35 @@ if __name__ == "__main__":
 
     # Using the with statement ensures the context is freed, and you can
     # recreate different CAM objects in a loop.
-    cam_algorithm = methods[args.method]
-    with cam_algorithm(model=model,
-                       target_layers=target_layers,
-                       use_cuda=args.use_cuda) as cam:
+    
+    # cam_algorithm = methods[args.method]
+    # with cam_algorithm(model=model,
+    #                    target_layers=target_layers,
+    #                    use_cuda=args.use_cuda) as cam:
 
-        # AblationCAM and ScoreCAM have batched implementations.
-        # You can override the internal batch size for faster computation.
-        cam.batch_size = 32
-        grayscale_cam = cam(input_tensor=input_tensor,
-                            targets=targets,
-                            aug_smooth=args.aug_smooth,
-                            eigen_smooth=args.eigen_smooth)
+    #     # AblationCAM and ScoreCAM have batched implementations.
+    #     # You can override the internal batch size for faster computation.
+    #     cam.batch_size = 32
+    #     grayscale_cam = cam(input_tensor=input_tensor,
+    #                         targets=targets,
+    #                         aug_smooth=args.aug_smooth,
+    #                         eigen_smooth=args.eigen_smooth)
 
-        # Here grayscale_cam has only one image in the batch
-        grayscale_cam = grayscale_cam[0, :]
+    #     # Here grayscale_cam has only one image in the batch
+    #     grayscale_cam = grayscale_cam[0, :]
 
-        cam_image = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
+    #     cam_image = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
 
-        # cam_image is RGB encoded whereas "cv2.imwrite" requires BGR encoding.
-        cam_image = cv2.cvtColor(cam_image, cv2.COLOR_RGB2BGR)
+    #     # cam_image is RGB encoded whereas "cv2.imwrite" requires BGR encoding.
+    #     cam_image = cv2.cvtColor(cam_image, cv2.COLOR_RGB2BGR)
 
-    gb_model = GuidedBackpropReLUModel(model=model, use_cuda=args.use_cuda)
-    gb = gb_model(input_tensor, target_category=None)
+    # gb_model = GuidedBackpropReLUModel(model=model, use_cuda=args.use_cuda)
+    # gb = gb_model(input_tensor, target_category=None)
 
-    cam_mask = cv2.merge([grayscale_cam, grayscale_cam, grayscale_cam])
-    cam_gb = deprocess_image(cam_mask * gb)
-    gb = deprocess_image(gb)
+    # cam_mask = cv2.merge([grayscale_cam, grayscale_cam, grayscale_cam])
+    # cam_gb = deprocess_image(cam_mask * gb)
+    # gb = deprocess_image(gb)
 
-    cv2.imwrite(f'{args.method}_cam.jpg', cam_image)
-    cv2.imwrite(f'{args.method}_gb.jpg', gb)
-    cv2.imwrite(f'{args.method}_cam_gb.jpg', cam_gb)
+    # cv2.imwrite(f'{args.method}_cam.jpg', cam_image)
+    # cv2.imwrite(f'{args.method}_gb.jpg', gb)
+    # cv2.imwrite(f'{args.method}_cam_gb.jpg', cam_gb)
