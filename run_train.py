@@ -58,7 +58,7 @@ class Train():
     def __init__(self, is_inference=False):
         self.args = Configs().parse()
         if not is_inference:
-            self.tb = SummaryWriter('runs_512/{}'.format(self.args.save_folder.split('/')[-1]))
+            self.tb = SummaryWriter('runs_512/{}'.format(self.args.save_folder[8:]))
         self.device = self.args.device 
         if self.device == "cuda":
             print("Number of GPUs: ", torch.cuda.device_count(), "Device Nbr: ", DEVICE_NR)

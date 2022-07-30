@@ -136,9 +136,13 @@ class RESCDataset(Dataset):
 class DukeDataset(Dataset):
     def __init__(self, args, data_type, infer_list=[]):
         train_from_resc_label_pth = 'baseline_models/SEAM/voc12/resc_cls_labels.npy'
-        train_from_resc_label = np.load(train_from_resc_label_pth, allow_pickle=True)
-        resc_srf_image_name_list = ''
-        print(testt)
+        train_from_resc_label = np.load(train_from_resc_label_pth, allow_pickle=True).item()
+        resc_srf_image_name_list = [k for k, v in train_from_resc_label.items() if v[0]==1]
+        
+        train_from_our_label_path = 'datasets/our_dataset/labels.csv'
+        train_from_our_label = pd.read_csv(train_from_our_label_path)
+        ours_edema_image_name_list = train_from_our_label[(train_from_our_label['SRF']==1)| (train_from_our_label['IRF']==1)]['img']
+        print(len(ours_edema_image_name_list))
         ss
         self.file_list = {'train': glob.glob("{}/train/original_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/original_images/*".format(args.root_dirs))}
         self.mask_list = {'train': glob.glob("{}/train/*".format(args.mask_dir)), 'test': glob.glob("{}/valid/*".format(args.mask_dir))}
