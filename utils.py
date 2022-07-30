@@ -22,7 +22,7 @@ type_color = {
 }
 OrgLabels = Configs().get_labels()#['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround']
 
-out_cam_pred_alpha = 0.3
+out_cam_pred_alpha = 0.6 # 0.3- 0.32 has the highest mIoU from SEAM results
 
 def get_num_classes():
     if 'BackGround' in OrgLabels:
@@ -55,15 +55,14 @@ def post_process_cam(cls, grayscale_cam, orig_mask, orig_image):
     # elif OrgLabels[cls] == 'EZ': grey_thred[orig_image < 0.5] = 0 # hrd, ez keep the light layer region
     return grey_thred
 
-def get_cam_results_per_class(cam, inputs, updated_image, pred):
+def get_cam_results_per_class(cam, inputs, updated_image, pred, i):
     rgb_img = (np.float32(inputs["image"][i][:3].permute(1, 2, 0)))
-
     orig_image = inputs['image'][i][0]
     orig_mask = inputs['mask'][i][0].clone()
     save_class_name = ''
     save_cam_in_row = []
     w, h = orig_image.shape[-2], orig_image.shape[-1]
-    bg_score = [np.ones_like((w, h)) * out_cam_pred_alpha] * (get_num_classes() + 1) # resc = 1 + 2 length
+    bg_score = [np.ones_like(orig_image) * out_cam_pred_alpha] * (get_num_classes() + 1) # resc = 1 + 2 length
     pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
     for cls in pred_classes:
         targets = [ClassifierOutputTarget(cls)]
@@ -76,7 +75,6 @@ def get_cam_results_per_class(cam, inputs, updated_image, pred):
         cam_image = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
         save_cam_in_row.append(cam_image)
         save_class_name =  save_class_name + '_' + OrgLabels[cls]
-
     labels = np.argmax(np.array(bg_score), axis=0) # [0 - num_class]
     
     color_mask = np.zeros((w, h, 3))
@@ -116,7 +114,7 @@ def save_cam_during_train(params, cam):
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True) # scale_each limit normalize for each independently in batch
         vutils.save_image(save_updated_img, save_path + '/epoch{0}_refined_{1}.jpg'.format(epoch, truth_label), normalize=True, scale_each=True)
 
-        save_class_name, save_cam_in_row, _ = get_cam_results_per_class(cam, inputs, updated_image, pred)
+        save_class_name, save_cam_in_row, _ = get_cam_results_per_class(cam, inputs, updated_image, pred, i)
         if (len(save_cam_in_row)):
             im_h = cv2.hconcat(save_cam_in_row)
             cv2.imwrite(save_path + '/epoch{0}_{1}.jpg'.format(epoch, save_class_name), im_h)
@@ -145,7 +143,7 @@ def save_cam_for_inference(params, cam):
             save_img = torch.cat([save_img, inputs["annot"][i].reshape(-1,3,w, h).to(args.device)], 0)
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True)
 
-        save_class_name, save_cam_in_row, labels = get_cam_results_per_class(cam, inputs, updated_image, pred)
+        save_class_name, save_cam_in_row, labels = get_cam_results_per_class(cam, inputs, updated_image, pred, i)
         gt.append(convert_resc_labels(inputs["annot"][i,0].clone()))
         ready_pred_4d.append(labels)
         if (len(save_cam_in_row)):

@@ -13,7 +13,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 
-DEVICE_NR = '0,1'
+DEVICE_NR = '0'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 
@@ -280,8 +280,8 @@ class Train():
         
         cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=self.target_layers)
         gt_list, cam_list = [], []
-        for batch, data in tqdm(enumerate(dataloader), total=len(dataloader)):
-            image, labels = data["image"].to(self.device), data["labels"].to(self.device)        
+        for _, data in tqdm(enumerate(dataloader), total=len(dataloader)):
+            image, _ = data["image"].to(self.device), data["labels"].to(self.device)        
             updated_image = image.clone()
             if self.args.input_gan:
                 input_for_gan = self.transform_norml(updated_image)
