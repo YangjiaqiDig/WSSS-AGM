@@ -14,16 +14,20 @@ from __future__ import print_function
 from gan_and_str.ganomaly.options import Options
 from gan_model import Ganomaly
 
+
 ##
-def load_gan_model(pretrained_dict, device):
+def load_gan_model(path):
     ##
     # ARGUMENTS
     opt = Options().inference_parse()
+
     # override by inference for ARGUMENTS
-    opt.batchsize = 1
-    opt.ngpu = 0
+    opt.batchsize = 3
+    # opt.ngpu = 3
+    # opt.gpu_ids = -1
+    opt.device = 'cuda'
     # Evaluation metric. auprc | roc | f1_score
-    model = Ganomaly(opt, pretrained_dict, device)
+    model = Ganomaly(opt, path)
     return model
 
 if __name__ == '__main__':

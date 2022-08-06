@@ -188,7 +188,7 @@ class DukeDataset(Dataset):
         mask_tensor = self.transform_mask(mask)
         torch.manual_seed(seed)
         label_tensor = self.transform_mask(label_arr)
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         # vutils.save_image(label_tensor, 'waht3.png', normalize=False, scale_each=True)
         
         # back: 0, ped: 128, srf: 191, retinal: 255
@@ -212,6 +212,7 @@ def train_transform(is_size, is_mask):
     transform_seq = transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize(is_size, interpolation=inter),
+        # transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(degrees=60),
         transforms.ToTensor(),

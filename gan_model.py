@@ -40,33 +40,29 @@ class BaseModel():
         torch.backends.cudnn.deterministic = True
         
     def inference(self, image_tensor):
-        with torch.no_grad():        
+        with torch.no_grad():
+            # print(image_tensor.is_cuda)
             self.input.resize_(image_tensor.size()).copy_(image_tensor)
             self.fake, latent_i, latent_o = self.netg(self.input)
             return self.fake.data
 
             
 ##
+# origin image + 
 class Ganomaly(BaseModel):
-    def __init__(self, opt, pretrained_dict, device):
+    def __init__(self, opt, path):
         super(Ganomaly, self).__init__(opt)
-
-        ##
-        self.device = torch.device(device)
-        # Create and initialize networks.
+        # cpu
+        self.device = torch.device(self.opt.device)
         self.netg = NetG(self.opt).to(self.device)
-        self.netd = NetD(self.opt).to(self.device)
         self.netg.apply(weights_init)
-        self.netd.apply(weights_init)
         
         with torch.no_grad():
             self.netg.eval()
-            # Load the weights of netg and netd.            
             try:
+                pretrained_dict = torch.load(path)['state_dict'] #, map_location='cpu'
                 self.netg.load_state_dict(pretrained_dict)
             except IOError:
                 raise IOError("netG weights not found")
 
-        # Initialize input tensors.
         self.input = torch.empty(size=(self.opt.batchsize, 3, self.opt.isize, self.opt.isize), dtype=torch.float32, device=self.device)
-        ##

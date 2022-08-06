@@ -1,11 +1,12 @@
 """Evaluation Metrics for Semantic Segmentation"""
-import torch
 import numpy as np
 import os
 from sklearn.metrics import accuracy_score, f1_score, classification_report, roc_auc_score
-from utils import OrgLabels, type_color
+from utils import OrgLabels
 from PIL import Image
-
+import os
+import argparse
+import glob
 
 # 0.8247863247863247 0.7519246396739377 0.8247863247863247
 # 0.8301282051282052 0.7603308530659053 0.8301282051282052
@@ -96,13 +97,13 @@ def scores(label_trues, label_preds, n_class):
         "Class IoU": cls_iu,
     }
 
-def record_score(score, save_path, iou_type):
+def record_score(score, save_path):
     score_list = []
 
     for i in range(3):
         score_list.append(score['Class IoU'][i])
         aveJ = score['Mean IoU']
-    with open('{}_iou_{}.txt'.format(save_path, iou_type), 'w') as f:
+    with open('{}_iou.txt'.format(save_path), 'w') as f:
         for num, cls_iou in enumerate(score_list):
             print('class {:2d} {:12} IU {:.2f}'.format(num, CAT_LIST[num], round(cls_iou, 3)))
             f.write('class {:2d} {:12} IU {:.2f}'.format(num, CAT_LIST[num], round(cls_iou, 3)) + '\n')
@@ -110,17 +111,88 @@ def record_score(score, save_path, iou_type):
         f.write('meanIOU: ' + str(aveJ) + '\n')    
         f.write('pixelAcc: ' + str(score['Pixel Accuracy']) + '\n' + 'meanAcc: ' + str(score['Mean Accuracy']) + '\n') 
 
+import cv2
 
-if __name__ == "__main__":
-    x = np.array([[1., 1., 1., 0., 0., 1], [1., 1., 1., 0., 0., 1]])
-    y = np.array([[0., 1., 1., 1., 0., 1], [0., 1., 1., 1., 0., 1]])
-    print(calculate_classification_metrics(x, y))
-    x = torch.empty(0,2)
-    y = torch.tensor([[3, 4], [3, 4]])
+categories = ['background', 'SRF', 'PED']
+def do_python_eval(predict_folder, gt_folder, name_list, input_type='png', threshold=1.0):
+    pred_list = []
+    gt_list = []
+
+    for idx in range(0,len(name_list)):
+        name = name_list[idx]
+        if input_type == 'png':
+            predict_file = os.path.join(predict_folder,'%s.png'%name)
+            predict = np.array(Image.open(predict_file)) #cv2.imread(predict_file)
+        elif input_type == 'npy':
+            predict_file = os.path.join(predict_folder,'%s.npy'%name)
+            predict_dict = np.load(predict_file, allow_pickle=True).item()
+            h, w = list(predict_dict.values())[0].shape
+            tensor = np.zeros((len(categories),h,w),np.float32)
+            for key in predict_dict.keys():
+                tensor[key+1] = predict_dict[key]
+            tensor[0,:,:] = threshold 
+            predict = np.argmax(tensor, axis=0).astype(np.uint8)
+            #TODO: need remove for change from the cam instead of resize here
+            predict = cv2.resize(predict, dsize=(512, 512))
+            # print(predict.shape, np.unique(predict))
+        pred_list.append(predict)
+        
+        gt_file = os.path.join(gt_folder,'%s.bmp'%name)
+        gt = np.array(Image.open(gt_file))
+        gt = cv2.resize(gt, dsize=(512, 512))
+        # import pdb; pdb.set_trace()
+        '''for RESC'''
+        gt[gt == 191] = 1
+        gt[gt == 128] = 2
+        gt[gt == 255] = 0
+        # print(gt.shape, np.unique(gt))
+        gt_list.append(gt)
+    return pred_list, gt_list
+ 
+
+if __name__ == '__main__':
+    # python metrics.py  --type npy --curve True
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--list", default='baseline_models/SEAM/resc/resc_cam/*', type=str)
+    parser.add_argument("--predict_dir", default='baseline_models/SEAM/resc/resc_cam', type=str)
+    parser.add_argument("--gt_dir", default='datasets/RESC/valid/label_images', type=str)
+    parser.add_argument('--type', default='npy', choices=['npy', 'png'], type=str)
+    parser.add_argument('--t', default=0.6, type=float) # 0.3 is the highest mIoU by curve
+    parser.add_argument('--curve', default=False, type=bool)
+    parser.add_argument('--log_dir', default='resc', type=str)
+    args = parser.parse_args()
+
+    if args.type == 'npy':
+        assert args.t is not None or args.curve
+    # df = pd.read_csv(args.list, names=['filename'])
+    name_list = [pth.split('/')[-1].split('.')[0] for pth in glob.glob(args.list)] #df['filename'].values
+    print('Disease size: ', len(name_list))
+    if not args.curve:
+        pred_list, gt_list = do_python_eval(args.predict_dir, args.gt_dir, name_list, args.type, args.t)
+        score = scores(gt_list, pred_list, n_class=3)
+        print(score)
+        record_score(score, args.log_dir)
+    else:
+        l = []
+        for i in range(60):
+            t = i/100.0
+            pred_list, gt_list = do_python_eval(args.predict_dir, args.gt_dir, name_list, args.type, t)
+            score = scores(gt_list, pred_list, n_class=3)
+            print(score)
+            record_score(score, args.log_dir)
+            l.append(score['Mean IoU'])
+            print('%d/60 background score: %.3f\tmIoU: %.3f%%'%(i, t, score['Mean IoU']))
+
+# if __name__ == "__main__":
+#     x = np.array([[1., 1., 1., 0., 0., 1], [1., 1., 1., 0., 0., 1]])
+#     y = np.array([[0., 1., 1., 1., 0., 1], [0., 1., 1., 1., 0., 1]])
+#     print(calculate_classification_metrics(x, y))
+#     x = torch.empty(0,2)
+#     y = torch.tensor([[3, 4], [3, 4]])
     
-    for i in range(0,4):
-        x = torch.cat((x, y))
-    print(x)
+#     for i in range(0,4):
+#         x = torch.cat((x, y))
+#     print(x)
 
     # print(classification_report(y, x))
     # import numpy as np

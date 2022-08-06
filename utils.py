@@ -22,7 +22,8 @@ type_color = {
 }
 OrgLabels = Configs().get_labels()#['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround']
 
-out_cam_pred_alpha = 0.6 # 0.3- 0.32 has the highest mIoU from SEAM results
+'''  0.6 has the highest mIoU from SEAM results, but our cam is too shallow, we use 0.3'''
+out_cam_pred_alpha = 0.35
 
 def get_num_classes():
     if 'BackGround' in OrgLabels:
@@ -44,11 +45,11 @@ def post_process_cam(cls, grayscale_cam, orig_mask, orig_image):
     mask_clone = orig_mask.clone() # NEUROSENSORY RETINA only (ILM to RPE)
     mask_clone[mask_clone == 0] = 0.5
     grey_thred = grey_thred * mask_clone.cpu().numpy()
-    grey_thred[grey_thred < 0.3] = 0  # (h, w)
+    grey_thred[grey_thred < 0.2] = 0  # (h, w)
 
-    if OrgLabels[cls] in ['IRF', 'SRF', 'PED']:
-        grey_thred[(orig_image > 0.2)] = 0 #keep bubble region (dark)
-    else: grey_thred[(orig_image < 0.5)] = 0 # hrd, ez keep the light layer region
+    # if OrgLabels[cls] in ['IRF', 'SRF', 'PED']:
+    #     grey_thred[(orig_image > 0.2)] = 0 #keep bubble region (dark)
+    # else: grey_thred[(orig_image < 0.5)] = 0 # hrd, ez keep the light layer region
                 
     # if OrgLabels[cls] in ['IRF', 'SRF', 'PED']:
     #     grey_thred[orig_image > 0.15] = 0 #keep bubble region (dark) #| (orig_mask == 0)
@@ -65,16 +66,17 @@ def get_cam_results_per_class(cam, inputs, updated_image, pred, i):
     bg_score = [np.ones_like(orig_image) * out_cam_pred_alpha] * (get_num_classes() + 1) # resc = 1 + 2 length
     pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
     for cls in pred_classes:
+        if OrgLabels[cls] == 'BackGround':
+            continue
         targets = [ClassifierOutputTarget(cls)]
-        grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=True) #(h,w)
+        grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=False) #(h,w)
         grayscale_cam = grayscale_cam[0, :]
-        
-        if OrgLabels[cls] != 'BackGround':
-            bg_score[cls + 1] = post_process_cam(cls, grayscale_cam, orig_mask, orig_image)
+        bg_score[cls + 1] = post_process_cam(cls, grayscale_cam, orig_mask, orig_image)
         visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
         cam_image = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
         save_cam_in_row.append(cam_image)
         save_class_name =  save_class_name + '_' + OrgLabels[cls]
+        # import pdb; pdb.set_trace()
     labels = np.argmax(np.array(bg_score), axis=0) # [0 - num_class]
     
     color_mask = np.zeros((w, h, 3))
@@ -101,26 +103,27 @@ def save_cam_during_train(params, cam):
         save_path = os.path.join(args.save_folder, 'iteration', '{}'.format(img_path.split('.')[0]))
         if not os.path.exists(save_path):
             os.makedirs(save_path)   
-        # truth_label = '{0}_{1}'.format(inputs["labels"][i][0], inputs["labels"][i][1])
         true_classes = [i for i,v in enumerate(inputs["labels"][i]) if v > 0.5]
         truth_label = [OrgLabels[cls] for cls in true_classes]
         truth_label = '_'.join(truth_label)
         w, h = inputs["image"][i].shape[-2], inputs["image"][i].shape[-1]
         save_img = inputs["image"][i].reshape(-1,3,w, h)
+        orig_mask = inputs['mask'][i].clone().reshape(-1,3,w, h)
+        save_img = torch.cat([save_img, orig_mask], 0)
         if 'annot' in inputs:
             # import pdb; pdb.set_trace()
             save_img = torch.cat([save_img, inputs["annot"][i].reshape(-1,3,w, h)], 0)
         save_updated_img = updated_image[i].reshape(-1,3,w, h)
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True) # scale_each limit normalize for each independently in batch
         vutils.save_image(save_updated_img, save_path + '/epoch{0}_refined_{1}.jpg'.format(epoch, truth_label), normalize=True, scale_each=True)
-
         save_class_name, save_cam_in_row, _ = get_cam_results_per_class(cam, inputs, updated_image, pred, i)
+        
         if (len(save_cam_in_row)):
             im_h = cv2.hconcat(save_cam_in_row)
             cv2.imwrite(save_path + '/epoch{0}_{1}.jpg'.format(epoch, save_class_name), im_h)
 
 def save_cam_for_inference(params, cam):
-    args, inputs, batch_preds, updated_image = params['args'], params['inputs'], params['batch_preds'], params['refined']
+    args, inputs, batch_preds, updated_image, classify_model = params['args'], params['inputs'], params['batch_preds'], params['refined'], params['model']
     non_background_names = [x for x in OrgLabels if 'BackGround' != x]
     lesion_classes = [OrgLabels.index(name) for name in non_background_names]
     ready_pred_4d = []
@@ -138,22 +141,33 @@ def save_cam_for_inference(params, cam):
         truth_label = [OrgLabels[cls] for cls in true_classes]
         truth_label = '_'.join(truth_label)
         w, h = inputs["image"][i].shape[-2], inputs["image"][i].shape[-1]
-        save_img = updated_image[i].reshape(-1,3,w, h)
+        
+        save_img = torch.cat([inputs["image"][i].reshape(-1,3,w, h).to(args.device), updated_image[i].reshape(-1,3,w, h)], 0)
+        orig_mask = inputs['mask'][i].clone().reshape(-1,3,w, h).to(args.device)
+        save_img = torch.cat([save_img, orig_mask], 0)
+
         if 'annot' in inputs:
             save_img = torch.cat([save_img, inputs["annot"][i].reshape(-1,3,w, h).to(args.device)], 0)
         vutils.save_image(save_img, save_path + '/orig_{}.jpg'.format(truth_label), normalize=True, scale_each=True)
 
         save_class_name, save_cam_in_row, labels = get_cam_results_per_class(cam, inputs, updated_image, pred, i)
+        
+        # TODO: need remove this if check, this is only for skip the cam disappear images
+        if save_cam_in_row[-2].max() == 0:
+            continue
         gt.append(convert_resc_labels(inputs["annot"][i,0].clone()))
         ready_pred_4d.append(labels)
         if (len(save_cam_in_row)):
             im_h = cv2.hconcat(save_cam_in_row)
             cv2.imwrite(save_path + '/{0}.jpg'.format(save_class_name), im_h)
-
+        # import pdb; pdb.set_trace()
     return gt, ready_pred_4d
   
 def save_cam_results(params, is_inference=False):
     cam = params['cam']
+    # target_layers = [params['model'].multi_task_model.base_model[-1][-3]]
+    # print(target_layers)
+    # cam = GradCAM(model=params['model'], use_cuda=params['args'].device, target_layers=target_layers)
     # batch_preds [BC] B: batch, C: Class
     if is_inference:
         return save_cam_for_inference(params, cam)

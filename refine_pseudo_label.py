@@ -1,7 +1,7 @@
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 import torch
 import numpy as np
-from utils import OrgLabels
+from utils import OrgLabels, post_process_cam, out_cam_pred_alpha, get_num_classes
       
 '''
 5 labels: image -> 2 / 5 (irf, ez)  -> class_prob > 0.5
@@ -75,24 +75,17 @@ def get_pseudo_label(params, cam):
     for i, pred in enumerate(batch_preds):
         orig_image = inputs["image"][i][0].clone()
         orig_mask = inputs['mask'][i][0].clone()
-        w, h = inputs["image"][i].shape[-2], inputs["image"][i].shape[-1]
-        pred_classes = [i for i,v in enumerate(pred) if v > 0.5]
-        all_grey = [np.zeros((w, h))] * (len(OrgLabels) + 1)
+        pred_classes = [i for i,v in enumerate(pred) if v > 0.5]        
+        bg_score = [np.ones_like(orig_image) * out_cam_pred_alpha] * (get_num_classes() + 1)
         for cls in pred_classes:
+            if OrgLabels[cls] == 'BackGround':
+                continue
             targets = [ClassifierOutputTarget(cls)]
-            grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=True)
+            grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=False)
             grayscale_cam = grayscale_cam[0, :]
-
-            grey_thred = grayscale_cam.copy()
-            grey_thred[grey_thred < 0.3] = 0
             
-            strict_grey = grey_thred.copy()
-            if OrgLabels[cls] in ['IRF', 'SRF']:
-                strict_grey[(orig_image > 0.2) | (orig_mask == 0)] = 0 #keep bubble region (dark)
-            else: strict_grey[(orig_image < 0.5) | (orig_mask == 0)] = 0 # hrd, ez keep the light layer region
-            if OrgLabels[cls] != 'BackGround': # dont illustrate the background
-                all_grey[cls + 1] = strict_grey
-        
-        labels = np.argmax(np.array(all_grey), axis=0) # (256, 256) with 0-6 labels
+            bg_score[cls + 1] = post_process_cam(cls, grayscale_cam, orig_mask, orig_image)
+            
+        labels = np.argmax(np.array(bg_score), axis=0) # (256, 256) with 0-6 labels
         pseudo_labels.append(labels)
     return torch.LongTensor(pseudo_labels)
