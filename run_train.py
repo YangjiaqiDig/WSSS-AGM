@@ -20,11 +20,11 @@ logging.basicConfig(level=logging.DEBUG)
 from gan_inference import load_gan_model
 from dataset import (DukeDataset, OCTDataset, RESCDataset)
 from refine_pseudo_label import refine_input_by_cam, get_pseudo_label
-from models import MultiTaskModel, CAM_Net, U_Net, Up_Sample
-from utils import OrgLabels, save_models, save_tensorboard, save_cam_results
+from models import MultiTaskModel, CAM_Net, Up_Sample
+from utils import CAMGeneratorAndSave, OrgLabels, diff_map_for_att, save_models, save_tensorboard
 from metrics import calculate_classification_metrics, calculate_roc
 from options import Configs
-
+from metrics import scores, record_score
 
 def network_class(args):
     if args.backbone == "resnet18":
@@ -100,8 +100,9 @@ class Train():
         seg_model = Up_Sample(shared_model, self.num_class, self.args.backbone)
 
         if self.args.continue_train:
-            print('Loading pretrained model from checkpoint {0}/weights/best.pwf'.format(self.args.check_point)) 
-            checkpoint = torch.load('{0}/weights/best.pwf'.format(self.args.check_point))   
+            reload_epoch = 'best' if self.args.cp_epoch == 'best' else 40
+            print('Loading pretrained model from checkpoint {0}/weights/{1}.pwf'.format(self.args.check_point, reload_epoch))
+            checkpoint = torch.load('{0}/weights/{1}.pwf'.format(self.args.check_point, reload_epoch))   
             cam_model.load_state_dict(checkpoint['state_dict'])
         
         self.cam_model = cam_model.to(self.args.device)
@@ -124,13 +125,16 @@ class Train():
         cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=self.target_layers)
         gt_list = torch.empty(0,len(OrgLabels)).to(self.device)
         pred_list = torch.empty(0,len(OrgLabels)).to(self.device)
+        
+        gt_img_list, cam_img_list = [], []
+        CAMGenerationModule = CAMGeneratorAndSave(opts=self.args, cam=cam, epoch=epoch)
         for batch, data in tqdm(enumerate(self.testloader), total=len(self.testloader)):
             image, labels, mask = data["image"].to(self.device), data["labels"].to(self.device), data['mask'].to(self.device)        
             updated_image = image.clone()
             if self.args.input_gan:
-                input_for_gan = self.transform_norml(updated_image)
-                gan_tensor = self.gan_pretrained.inference(input_for_gan)
-                updated_image = torch.cat((image, gan_tensor), dim=1)
+                gan_inputs = self.transform_norml(updated_image)
+                healthy_img = self.gan_pretrained.inference(gan_inputs)
+                updated_image = torch.cat((image, healthy_img), dim=1)
             if self.args.mask_enhance:
                 mask_clone = mask.clone()
                 mask_clone[mask_clone == 0] = 0.2
@@ -147,9 +151,11 @@ class Train():
                 seg_outputs = self.seg_model(updated_image) #(batch, nb_class, w, h), include 0 as background
                 seg_loss = self.loss_seg(seg_outputs, pseudo_label.to(self.device))
                 total_seg_loss_val += seg_loss.cpu().item()
-            params = {'args': self.args, 'epoch': epoch, 'cam': cam, 'inputs': data, 'batch_preds': sig_prediction, 'refined': updated_image}
-            save_cam_results(params)  
-                    
+            params = {'inputs': data, 'batch_preds': sig_prediction, 'refined': updated_image}
+            gt_res, pred_res = CAMGenerationModule.get_cam_and_save(params)  
+            gt_img_list += gt_res
+            cam_img_list += pred_res
+            
             with torch.no_grad():
                 clf_loss = self.cam_loss(outputs, labels)
                 total_cls_loss_val += clf_loss.cpu().item()
@@ -157,7 +163,11 @@ class Train():
                 total_acc_val += Counter(batch_accuracies_metrics)
                 gt_list = torch.cat((gt_list, labels))
                 pred_list = torch.cat((pred_list, sig_prediction))
-            
+        
+        score = scores(gt_img_list, cam_img_list, n_class=3)
+        print(score)
+        record_score(score, 'resc')
+        
         # Print accuracy
         valid_acc_epoch, valid_loss_epoch, valid_seg_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_cls_loss_val / (batch + 1), total_seg_loss_val / (batch+1)
         roc_avg, roc_class = calculate_roc(pred_list, gt_list)
@@ -178,9 +188,12 @@ class Train():
             image, labels, mask = data["image"].to(self.device), data["labels"].to(self.device), data['mask'].to(self.device)
             updated_image = image.clone()
             if self.args.input_gan:
-                input_for_gan = self.transform_norml(updated_image)
-                gan_tensor = self.gan_pretrained.inference(input_for_gan)
-                updated_image = torch.cat((image, gan_tensor), dim=1)
+                gan_inputs = self.transform_norml(updated_image)
+                healthy_img = self.gan_pretrained.inference(gan_inputs)
+                tensor_for_att = diff_map_for_att(updated_image, healthy_img)
+                
+                updated_image = torch.cat((image, healthy_img), dim=1)
+                
             if self.args.mask_enhance:
                 mask_clone = mask.clone()
                 mask_clone[mask_clone == 0] = 0.2
@@ -194,6 +207,8 @@ class Train():
             clf_loss = self.cam_loss(outputs, labels)
             clf_loss.backward()
             self.cam_optimizer.step()
+            
+            ##############################
             if self.args.segmentation < epoch + 1:
                 outputs_for_seg = sig_prediction.clone()
                 params_seg = {'inputs': data, 'batch_preds': outputs_for_seg, 'refined': updated_image}
@@ -205,7 +220,8 @@ class Train():
                 self.seg_optimizer.step()
                 
                 total_seg_loss += seg_loss.cpu().item()
-            
+                
+            ##############################            
             with torch.no_grad():
                 total_cls_loss += clf_loss.cpu().item()
                 batch_accuracies_metrics = calculate_classification_metrics(sig_prediction, labels)
@@ -281,13 +297,14 @@ class Train():
         
         cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=self.target_layers)
         gt_list, cam_list = [], []
+        CAMGenerationModule = CAMGeneratorAndSave(opts=self.args, cam=cam)
         for _, data in tqdm(enumerate(dataloader), total=len(dataloader)):
             image, _, mask = data["image"].to(self.device), data["labels"].to(self.device), data['mask'].to(self.device)        
             updated_image = image.clone()
             if self.args.input_gan:
-                input_for_gan = self.transform_norml(updated_image)
-                gan_tensor = self.gan_pretrained.inference(input_for_gan)
-                updated_image = torch.cat((image, gan_tensor), dim=1)
+                gan_inputs = self.transform_norml(updated_image)
+                healthy_img = self.gan_pretrained.inference(gan_inputs)
+                updated_image = torch.cat((image, healthy_img), dim=1)
             if self.args.mask_enhance:
                 mask_clone = mask.clone()
                 mask_clone[mask_clone == 0] = 0.2
@@ -298,13 +315,12 @@ class Train():
             outputs = self.cam_model(updated_image)
             sig_prediction = self.sigmoid(outputs)
             # maybe only for args.n_epochs in first condition
-            params = {'args': self.args, 'cam': cam, 'inputs': data, 'batch_preds': sig_prediction, 'refined': updated_image, 'model':  self.cam_model}
-            gt_res, pred_res = save_cam_results(params, is_inference=True)
+            params = {'inputs': data, 'batch_preds': sig_prediction, 'refined': updated_image}
+            gt_res, pred_res = CAMGenerationModule.get_cam_and_save(params)  
             gt_list += gt_res
             cam_list += pred_res
         print(len(cam_list))
         # import pdb; pdb.set_trace()
-        from metrics import scores, record_score
         score = scores(gt_list, cam_list, n_class=3)
         print(score)
         record_score(score, 'resc')
@@ -313,8 +329,8 @@ if __name__ == "__main__":
     is_inference=False
     trainer = Train(is_inference)
     if is_inference:
+        # trainer.inference(infer_list=['sn8828_75.bmp', 'sn22697_89.bmp','sn29218_71.bmp'])
         trainer.inference()
-        # trainer.inference(infer_list=['sn22697_89.bmp','sn29218_71.bmp'])
         # trainer.inference(infer_list=['DME-15307-1.jpeg',
         #                               'DME-4240465-41.jpeg', 
         #                               'DR10.jpeg',

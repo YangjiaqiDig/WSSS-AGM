@@ -7,7 +7,6 @@ import torchvision.utils as vutils
 from utils import OrgLabels
 import torch
 import pandas as pd
-from sklearn.metrics import accuracy_score, f1_score
 import random
 import logging
 # pd.set_option("display.max_rows", None)

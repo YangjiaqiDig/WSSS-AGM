@@ -111,7 +111,6 @@ def record_score(score, save_path):
         f.write('meanIOU: ' + str(aveJ) + '\n')    
         f.write('pixelAcc: ' + str(score['Pixel Accuracy']) + '\n' + 'meanAcc: ' + str(score['Mean Accuracy']) + '\n') 
 
-import cv2
 
 categories = ['background', 'SRF', 'PED']
 def do_python_eval(predict_folder, gt_folder, name_list, input_type='png', threshold=1.0):
@@ -132,14 +131,13 @@ def do_python_eval(predict_folder, gt_folder, name_list, input_type='png', thres
                 tensor[key+1] = predict_dict[key]
             tensor[0,:,:] = threshold 
             predict = np.argmax(tensor, axis=0).astype(np.uint8)
-            #TODO: need remove for change from the cam instead of resize here
-            predict = cv2.resize(predict, dsize=(512, 512))
+            # predict = cv2.resize(predict, dsize=(512, 512))
             # print(predict.shape, np.unique(predict))
         pred_list.append(predict)
         
         gt_file = os.path.join(gt_folder,'%s.bmp'%name)
         gt = np.array(Image.open(gt_file))
-        gt = cv2.resize(gt, dsize=(512, 512))
+        # gt = cv2.resize(gt, dsize=(512, 512))
         # import pdb; pdb.set_trace()
         '''for RESC'''
         gt[gt == 191] = 1
