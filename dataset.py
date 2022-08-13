@@ -167,21 +167,10 @@ class DukeDataset(Dataset):
         image_tensor = self.transform(image_arr)
         torch.manual_seed(seed)
         mask_tensor = self.transform_mask(mask)
-        # import pdb; pdb.set_trace()
         
-        # back: 0, ped: 128, srf: 191, retinal: 255
-        l = {'SRF': 0, 'PED': 0, 'lesion': 0, 'health': 0, 'BackGround': 1}
-        labels = np.unique(label_arr)
-        if len(labels) == 1:
-            l['health'] += 1
-        if 128 in labels:
-            l['PED'] += 1
-        if 191 in labels:
-            l['SRF'] += 1
-        if 255 in labels:
-            l['lesion'] +=1 
+        image_label = convert_resc_pixel2image(label_arr)
 
-        return {'image': image_tensor, 'labels': torch.FloatTensor([l[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor}
+        return {'image': image_tensor, 'labels': torch.FloatTensor([image_label[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor}
     def __len__(self):
         return len(self.file_list[self.data_type])
  

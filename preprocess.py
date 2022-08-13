@@ -75,45 +75,6 @@ def overlap():
     # image_residual = torch.abs(image_rec - image)
 
 def conencted_component_removal():
-    import subprocess
-    from wand.image import Image
-    # img = cv.imread('examples/ganomaly/test/1.abnormal/DME-9721607-1.jpeg',0)
-    # ny = Image(filename ='examples/ganomaly/test/1.abnormal/DME-9925591-1.jpeg')
-    # objects = ny.connected_components()
-    # # print(objects)
-    # ny.edge(radius = 1)
-    # ny.save(filename="edge new york.jpg")
-    # cmd = 'convert examples/ganomaly/test/1.abnormal/DME-9925591-1.jpeg -fuzz 30% -trim +repage 0_trim.png'
-    # subprocess.check_output(cmd, shell=True, universal_newlines=True)
-    # ss
-    # with Image(filename='examples/ganomaly/test/test/DME-30521-41.jpeg') as img:
-    #     objects = img.connected_components()
-    #     print(objects)
-    #     for cc_obj in objects:
-    #         print("{0._id}: {0.size} {0.offset}".format(cc_obj))
-    # cmd = 'convert examples/ganomaly/test/1.abnormal/DME-9721607-1.jpeg -fuzz 30% -trim +repage 0_trim.png'
-    # subprocess.check_output(cmd, shell=True, universal_newlines=True)
-    #find all your connected components (white blobs in your image)
-    # nb_components, output, stats, centroids = cv.connectedComponentsWithStats(img, connectivity=8)
-    # # #connectedComponentswithStats yields every seperated component with information on each of them, such as size
-    # # #the following part is just taking out the background which is also considered a component, but most of the time we don't want that.
-    # sizes = stats[:, -1]
-    # print(nb_components)
-    # # print(output)
-    # # print(nb_components)
-
-    # max_label = 1
-    # max_size = sizes[0]
-    # # print(max_size)
-    # for i in range(1, nb_components):
-    #     if sizes[i] > max_size:
-    #         max_label = i
-    #         # max_size = sizes[i]
-    # img2 = np.zeros(output.shape)
-    # img2[output == max_label] = 255
-    # cv.imwrite('test.png', output)
-    # print(img2)
-
     # minimum size of particles we want to keep (number of pixels)
     #here, it's a fixed value, but you can set it as you want, eg the mean of the sizes or whatever
     # min_size = 1500
@@ -259,6 +220,9 @@ def generate_mask_resc():
     #     image_name = item.split('/')[-1]
     #     res = generate_background_mask(item)
     #     cv.imwrite('RESC/mask/valid/{}'.format(image_name), res)
+
+def generate_healthy_gan_resc():
+    return
 
 if __name__ == "__main__":
     # overlap()
