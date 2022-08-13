@@ -42,7 +42,7 @@ def normalized_batch_tensor(t):
     t = t.view(orig_size)
     return t
 
-def diff_map_for_att(orig_tensor, gan_tensor):
+def diff_map_for_att(orig_tensor, gan_tensor, mask_tensor):
     # batch, channel, h, w
     normalized_orig = orig_tensor.clone()
     normalized_gan = gan_tensor.clone()
@@ -52,11 +52,12 @@ def diff_map_for_att(orig_tensor, gan_tensor):
     
     # TODO: apply mask to mask out the background
     abs_diff = torch.abs(normalized_orig - normalized_gan)
+    mask_out_diff = abs_diff * mask_tensor
     # vutils.save_image(normalized_orig, 'examples/norm.png', normalize=False, scale_each=True)
     # vutils.save_image(normalized_gan, 'examples/norm_gan.png', normalize=False, scale_each=True)
     # vutils.save_image(abs_diff, 'examples/diff.png', normalize=False, scale_each=True)
 
-    return abs_diff
+    return mask_out_diff
 
 def convert_resc_labels(img):
     # 0 background, 
@@ -86,6 +87,9 @@ class CAMGeneratorAndSave():
         self.epoch = epoch
         non_background_names = [x for x in OrgLabels if 'BackGround' != x]
         self.lesion_classes = [OrgLabels.index(name) for name in non_background_names]
+        
+    def set_epoch(self, epoch):
+        self.epoch = epoch
         
     def get_cam_results_per_class(self, orig_img, orig_mask, ground_true_classes):
         save_class_name = ''
@@ -186,7 +190,7 @@ def save_models(args, epoch, cam_model, cam_optimizer, is_best=False):
     torch.save({
         'epoch': epoch,
         'args': args,
-        'state_dict': cam_model.state_dict(),
+        'state_dict': cam_model.module.state_dict(),
         'optimizer': cam_optimizer.state_dict(),
     }, save_path + "/{0}.pwf".format(save_name)) 
 

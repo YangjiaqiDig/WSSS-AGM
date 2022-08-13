@@ -49,26 +49,6 @@ def refine_input_by_cam(args, model, image, mask, cam, aug_smooth=True):
             updated_input_tensor[batch_idx, s:s+3,] = inputs_after_soft_addon
     return updated_input_tensor
 
-# Not use in current version
-def refine_input_by_background_cam(args, model, image, mask, cam, aug_smooth=True):
-    outputs = model(image)
-    bacth_bg_preds = (outputs[:, -1] > 0.5) * 1 # [batch] -> (0,1)
-    bg_cls = len(OrgLabels) - 1
-    targets = [ClassifierOutputTarget(bg_cls)] * len(image) # for all in batch return the background cam
-    batch_grayscale_cam = cam(input_tensor=image,targets=targets,eigen_smooth=False, aug_smooth=aug_smooth)
-    grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
-    grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels [batch, 3, w, h]
-    
-    updated_input_tensor = image.clone() # [batch, c, w, h]
-    '''Apply background cam on original image'''
-    # BackGround CAM * Original Image for predicted 1 background image only.
-    for batch_idx, bg_pred in enumerate(bacth_bg_preds):
-        soft_apply = grayscale_tensor[batch_idx] * image[batch_idx, :3,] if bg_pred > 0 else image[batch_idx, :3] # [3, w, h]
-        soft_min, soft_max = soft_apply.min(), soft_apply.max()
-        soft_apply.add_(-soft_min).div_(soft_max - soft_min + 1e-5)
-        updated_input_tensor[batch_idx, :3,] = soft_apply
-    return updated_input_tensor
-
 def get_pseudo_label(params, cam):
     inputs, batch_preds, updated_image = params['inputs'], params['batch_preds'], params['refined']
     pseudo_labels = []

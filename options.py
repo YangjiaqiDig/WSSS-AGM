@@ -26,7 +26,6 @@ class Configs():
         self.parser.add_argument("--resc_labels", type=str, default=['SRF', 'PED', 'BackGround'], help="['SRF', 'PED', 'LESION', 'BackGround']")        
         self.parser.add_argument("--boe_labels", type=str, default=['Fluid', 'BackGround'], help="['SRF', 'PED', 'LESION', 'BackGround']")
         self.parser.add_argument("--contrast", type=bool, default=False, help="Increase contrast of input image")
-        self.parser.add_argument("--mask_enhance", type=bool, default=False, help="Mask input image by enhance")
 
         self.parser.add_argument("--att_module", type=bool, default=True, help="If activate self-attention branch")        
         self.parser.add_argument("--segmentation", type=int, default=50, help="The number of epoch that starts segmentation branch")
@@ -36,8 +35,8 @@ class Configs():
         self.parser.add_argument("--n_epochs", type=int, default=40, help="Number of training epochs")
         self.parser.add_argument("--num_iteration", type=int, default=0, help="Number of iterations for refine CAM")
         
-        self.parser.add_argument("--train_batch_size", type=int,default=8, help="Batch size for training")
-        self.parser.add_argument("--valid_batch_size", type=int,default=1, help="Batch size for validation")
+        self.parser.add_argument("--train_batch_size", type=int,default=4, help="Batch size for training")
+        self.parser.add_argument("--valid_batch_size", type=int,default=4, help="Batch size for validation")
         self.parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
         self.parser.add_argument("--lr_schedule", type=dict, default={'step': 15, 'gamma': 0.5}, help="Learning rate decay step and gamma")
         
@@ -57,6 +56,7 @@ class Configs():
         # self.parser.add_argument("--k_folds", type=int, default=10, help="k folds")
         # self.parser.add_argument("--input_structure", type=bool, default=False, help="If involve Struture as input")
         self.parser.add_argument("--n_refine_background", type=int, default=0, help="Number of background only refinement")
+        self.parser.add_argument("--mask_enhance", type=bool, default=False, help="Mask input image by enhance")
     def parse(self, is_inference=False):
         args = self.parser.parse_args()
         if is_inference:
