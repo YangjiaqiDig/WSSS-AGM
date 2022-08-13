@@ -235,8 +235,6 @@ class Train():
             
         train_acc_epoch, train_loss_epoch, train_seg_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc.items()}, total_cls_loss / (batch + 1), total_seg_loss / (batch + 1)
         roc_avg, roc_class = calculate_roc(pred_list, gt_list)
-        torch.cuda.empty_cache() ## <<<<---- AND HERE
-        torch.cuda.synchronize()
         print('Epoch', str(epoch + 1), '- Train loss:', train_loss_epoch, '- Seg loss', train_seg_loss_epoch, '- Train ROC:', roc_avg,  "- ROC per class:", roc_class, "- Train acc:", train_acc_epoch)
         return train_loss_epoch, train_acc_epoch, roc_avg, roc_class
 
@@ -255,12 +253,16 @@ class Train():
         best_roc = 0
         for epoch in range(0, self.num_of_epochs):
             train_loss, train_acc_matrix, train_roc_avg, train_roc_class = self.train_once(epoch)
+            torch.cuda.empty_cache() ## <<<<---- AND HERE
+            torch.cuda.synchronize()
             
             mark_epoch = epoch + self.args.n_epochs if self.args.continue_train else epoch
             include_valid = False
             valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class = None, None, None, None
-            if (epoch + 1) % 1 == 0 or (epoch + 1) > self.args.n_epochs:
+            if (epoch + 1) % 5 == 0 or (epoch + 1) > self.args.n_epochs:
                 valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class = self.valid_once(epoch)
+                torch.cuda.empty_cache() ## <<<<---- AND HERE
+                torch.cuda.synchronize()
                 include_valid = True
                 if valid_roc_avg >= best_roc:
                     save_models(self.args, epoch, self.cam_model, self.cam_optimizer, is_best=True)

@@ -3,8 +3,7 @@ import numpy as np
 from PIL import Image, ImageEnhance
 from torch.utils.data import Dataset
 from torchvision import transforms
-import torchvision.utils as vutils
-from utils import OrgLabels
+from utils import OrgLabels, convert_resc_pixel2image
 import torch
 import pandas as pd
 import random
@@ -101,33 +100,16 @@ class RESCDataset(Dataset):
         
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
-        if (label_arr.ndim == 2):
-            label_arr = np.repeat(label_arr[..., np.newaxis], 3, -1)
-
+            
         seed = np.random.randint(2147483647) 
         random.seed(seed) 
         torch.manual_seed(seed)
         image_tensor = self.transform(image_arr)
         torch.manual_seed(seed)
         mask_tensor = self.transform_mask(mask)
-        torch.manual_seed(seed)
-        label_tensor = self.transform_mask(label_arr)
-        # vutils.save_image(label_tensor, 'waht3.png', normalize=False, scale_each=True)
-        # import pdb; pdb.set_trace()
         
-        # back: 0, ped: 128, srf: 191, retinal: 255
-        l = {'SRF': 0, 'PED': 0, 'lesion': 0, 'health': 0, 'BackGround': 1}
-        labels = np.unique(label_arr)
-        if len(labels) == 1:
-            l['health'] += 1
-        if 128 in labels:
-            l['PED'] += 1
-        if 191 in labels:
-            l['SRF'] += 1
-        if 255 in labels:
-            l['lesion'] +=1 
-
-        return {'image': image_tensor, 'labels': torch.FloatTensor([l[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor,'annot': label_tensor}
+        image_label = convert_resc_pixel2image(label_arr)
+        return {'image': image_tensor, 'labels': torch.FloatTensor([image_label[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor}
 
     def __len__(self):
         return len(self.file_list[self.data_type])
@@ -185,10 +167,7 @@ class DukeDataset(Dataset):
         image_tensor = self.transform(image_arr)
         torch.manual_seed(seed)
         mask_tensor = self.transform_mask(mask)
-        torch.manual_seed(seed)
-        label_tensor = self.transform_mask(label_arr)
         # import pdb; pdb.set_trace()
-        # vutils.save_image(label_tensor, 'waht3.png', normalize=False, scale_each=True)
         
         # back: 0, ped: 128, srf: 191, retinal: 255
         l = {'SRF': 0, 'PED': 0, 'lesion': 0, 'health': 0, 'BackGround': 1}
@@ -202,7 +181,7 @@ class DukeDataset(Dataset):
         if 255 in labels:
             l['lesion'] +=1 
 
-        return {'image': image_tensor, 'labels': torch.FloatTensor([l[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor,'annot': label_tensor}
+        return {'image': image_tensor, 'labels': torch.FloatTensor([l[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor}
     def __len__(self):
         return len(self.file_list[self.data_type])
  

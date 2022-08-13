@@ -1,6 +1,4 @@
 import os
-from turtle import pd
-from baseline_models.WSMIS import inference
 import torch
 import numpy as np
 from options import Configs
@@ -58,6 +56,21 @@ def diff_map_for_att(orig_tensor, gan_tensor, mask_tensor):
     # vutils.save_image(abs_diff, 'examples/diff.png', normalize=False, scale_each=True)
 
     return mask_out_diff
+
+# input is array H * W
+def convert_resc_pixel2image(label_pixel_arr):
+    # back: 0, ped: 128, srf: 191, retinal: 255
+    image_label = {'SRF': 0, 'PED': 0, 'lesion': 0, 'health': 0, 'BackGround': 1}
+    labels = np.unique(label_pixel_arr)
+    if len(labels) == 1:
+        image_label['health'] += 1
+    if 128 in labels:
+        image_label['PED'] += 1
+    if 191 in labels:
+        image_label['SRF'] += 1
+    if 255 in labels:
+        image_label['lesion'] +=1 
+    return image_label
 
 def convert_resc_labels(img):
     # 0 background, 
@@ -140,9 +153,7 @@ class CAMGeneratorAndSave():
         true_classes = [i for i,v in enumerate(self.inputs["labels"][batch_nb]) if v > 0.5]
         truth_label = [OrgLabels[cls] for cls in true_classes]
         truth_label = '_'.join(truth_label)
-        save_img = [orig_img, orig_mask]
-        if 'annot' in self.inputs:
-            save_img += [orig_annot]
+        save_img = [orig_img, orig_mask, orig_annot]
         save_image_h = cv2.hconcat(save_img)
         
         if self.is_inference:
