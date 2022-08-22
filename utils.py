@@ -118,6 +118,7 @@ class CAMGeneratorAndSave():
             if OrgLabels[cls] == 'BackGround' or cls not in ground_true_classes:
                 continue
             targets = [ClassifierOutputTarget(cls)]
+            self.cam.model.module.assign_conditions(True, False)
             grayscale_cam = self.cam(input_tensor=self.updated_image,targets=targets,eigen_smooth=False, aug_smooth=False) #(h,w)
             cam_res = grayscale_cam[0, :].copy()
             resized_cam = F.interpolate(torch.from_numpy(cam_res).unsqueeze(0).unsqueeze(0), size=orig_mask.shape, mode='bilinear', align_corners=False)[0,0].numpy()

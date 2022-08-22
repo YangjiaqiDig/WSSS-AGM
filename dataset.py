@@ -183,8 +183,6 @@ def train_transform(is_size, is_mask):
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(degrees=60),
         transforms.ToTensor(),
-        # transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                            #  std=[0.229, 0.224, 0.225])
     ])
     return transform_seq
 
@@ -194,8 +192,6 @@ def valid_transform(is_size, is_mask):
         transforms.ToPILImage(),
         transforms.Resize(is_size, interpolation=inter),
         transforms.ToTensor(),
-        # transforms.Normalize(mean=[0.485, 0.456, 0.406],
-        #                      std=[0.229, 0.224, 0.225])
     ])
     return transform_seq
 

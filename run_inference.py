@@ -2,7 +2,7 @@ from .run_train import Train
 import logging
 import os
 
-from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, GuidedBackpropReLUModel
+from pytorch_grad_cam import GradCAM
 import torch
 from tqdm import tqdm
 
@@ -12,7 +12,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 from dataset import (DukeDataset, OCTDataset, RESCDataset)
 from refine_pseudo_label import refine_input_by_cam
-from utils import diff_map_for_att
+from utils import CAMGeneratorAndSave, diff_map_for_att
 from metrics import scores, record_score
 
 class Inference(Train):
@@ -22,22 +22,26 @@ class Inference(Train):
     def inference(self, infer_list=[]):
         # if not give infer list of image names, then default as infer all testing
         self.args.continue_train = True
-        self.train_parameters()
-        if 'our_dataset' in self.args.root_dirs:
-            curr_dataset = OCTDataset(self.args, data_type='inference', infer_list=infer_list)
-        elif 'RESC' in self.args.root_dirs:
-            curr_dataset = RESCDataset(self.args, data_type='inference', infer_list=infer_list)
-        elif 'BOE' in self.args.root_dirs:
-            curr_dataset = DukeDataset(self.args, data_type='inference', infer_list=infer_list)
+        if not infer_list:
+            _, infer_dataset = self.get_dataset()
+        else:
+            if 'our_dataset' in self.args.root_dirs:
+                infer_dataset = OCTDataset(self.args, data_type='inference', infer_list=infer_list)
+            elif 'RESC' in self.args.root_dirs:
+                infer_dataset = RESCDataset(self.args, data_type='inference', infer_list=infer_list)
+            elif 'BOE' in self.args.root_dirs:
+                infer_dataset = DukeDataset(self.args, data_type='inference', infer_list=infer_list)
 
-        infer_dataset = self.dataset_test if not len(infer_list) else curr_dataset
         dataloader = torch.utils.data.DataLoader(
             infer_dataset,
             num_workers=8,
             batch_size=self.args.valid_batch_size, shuffle=False)
-        self.cam_model.eval()
         
-        cam = GradCAM(model=self.cam_model, use_cuda=self.device, target_layers=self.target_layers)
+        multi_task_model, _, _ = self.get_models()
+        multi_task_model.eval()
+        target_layers = [multi_task_model.module.SharedNet.base_model[-1][-1]] # .module. if use dataparallel
+        with GradCAM(model=multi_task_model, use_cuda=self.device, target_layers=target_layers) as cam:
+            CAMGenerationModule = CAMGeneratorAndSave(opts=self.args, cam=cam)
         tensor_for_att = None
         gt_list, cam_list = [], []
         for _, data in tqdm(enumerate(dataloader), total=len(dataloader)):
@@ -48,14 +52,17 @@ class Inference(Train):
                 healthy_img = self.gan_pretrained.inference(gan_inputs)
                 if self.args.att_module:
                     tensor_for_att = diff_map_for_att(updated_image, healthy_img, mask)
-                updated_image = torch.cat((image, healthy_img), dim=1)
+                    updated_image = torch.cat((image, healthy_img, tensor_for_att), dim=1)
+                else:
+                    updated_image = torch.cat((image, healthy_img), dim=1)
             if self.args.num_iteration > 0:
-                updated_image = refine_input_by_cam(self.args, self.cam_model, updated_image, mask, cam)
-            outputs = self.cam_model(updated_image, tensor_for_att)
-            sig_prediction = self.sigmoid(outputs)
+                updated_image = refine_input_by_cam(self.device, multi_task_model, updated_image, mask)
+                
+            cls_outputs, _ = multi_task_model(updated_image)
+            sig_prediction = self.sigmoid(cls_outputs)
             # maybe only for args.n_epochs in first condition
             params = {'inputs': data, 'batch_preds': sig_prediction, 'refined': updated_image}
-            gt_res, pred_res = self.CAMGenerationModule.get_cam_and_save(params)  
+            gt_res, pred_res = CAMGenerationModule.get_cam_and_save(params, is_inference)  
             gt_list += gt_res
             cam_list += pred_res
         print(len(cam_list))

@@ -41,7 +41,7 @@ class Configs():
         self.parser.add_argument("--lr_schedule", type=dict, default={'step': 15, 'gamma': 0.5}, help="Learning rate decay step and gamma")
         
         self.parser.add_argument("--check_point", type=str, default="outputs/resc_512/origin_gan", help="Path of the pre-trained Network")
-        self.parser.add_argument("--cp_epoch", type=str, default="last", help="best, last")        
+        self.parser.add_argument("--ckp_epoch", type=str, default="last", help="best, last")        
         self.parser.add_argument("--continue_train", type=bool, default=False, help="Continue train")
         self.parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda or cpu)")
         self.parser.add_argument("--cam_type", type=str, default="gradcam", help="GradCAM")

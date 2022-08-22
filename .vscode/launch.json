@@ -6,11 +6,12 @@
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",
-            "program": "dataloader.py",
+            // "program": "dataloader.py",
+            "program": "run_sample.py",
             // "args": ["--params", "params/DRIVE_train.json", "--train_batch", "2", "--warp", "0"],
             "console": "integratedTerminal",
             "env": {"CUDA_VISIBLE_DEVICES": "1"},
-            "cwd": "${workspaceFolder}/baseline_models/WSMIS/irn/voc12/"
+            "cwd": "${workspaceFolder}/baseline_models/WSMIS/irn/"
         }
     ]
 }

@@ -2,7 +2,8 @@ from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 import torch
 import numpy as np
 from utils import OrgLabels, post_process_cam, out_cam_pred_alpha, get_num_classes
-      
+from pytorch_grad_cam import GradCAM
+
 '''
 5 labels: image -> 2 / 5 (irf, ez)  -> class_prob > 0.5
 [0.1, 0.8, 0.1, 0.8, 1]
@@ -11,17 +12,19 @@ Muli(cam) -> 0
 Sum(cam5) -> 1
 filter cam5 -> cam2 -> Sum() -> normalize
 '''
-def refine_input_by_cam(args, model, image, mask, cam, aug_smooth=True):
+def refine_input_by_cam(device, multi_task_model, image, mask, aug_smooth=False):
     with torch.no_grad():
-        outputs = model(image)
+        outputs = multi_task_model(image)
     bacth_preds = (outputs > 0.5) * 1 # [batch, cls] -> (0,1)
     batch_cam_masks = []
-    for cls in range(len(OrgLabels)):
-        targets = [ClassifierOutputTarget(cls)] * len(image) # for all in batch return the current class cam
-        batch_grayscale_cam = cam(input_tensor=image,targets=targets,eigen_smooth=False, aug_smooth=aug_smooth)
-        grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(args.device)
-        grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels
-        batch_cam_masks.append(grayscale_tensor) # cls, [batch, 3, w, h]
+    target_layers = [multi_task_model.module.SharedNet.base_model[-1][-1]] # .module. if use dataparallel
+    with GradCAM(model=multi_task_model, use_cuda=device, target_layers=target_layers) as cam:
+        for cls in range(len(OrgLabels)):
+            targets = [ClassifierOutputTarget(cls)] * len(image) # for all in batch return the current class cam
+            batch_grayscale_cam = cam(input_tensor=image,targets=targets, eigen_smooth=False, aug_smooth=aug_smooth)
+            grayscale_tensor = torch.from_numpy(batch_grayscale_cam).to(device)
+            grayscale_tensor = grayscale_tensor.unsqueeze(1).repeat(1, 3, 1, 1) # extend gray to 3 channels
+            batch_cam_masks.append(grayscale_tensor) # cls, [batch, 3, w, h]
     updated_input_tensor = image.clone()
     for batch_idx, single_batch_pred in enumerate(bacth_preds):
         singel_cam_masks = [batch_cam_mask[batch_idx] for batch_cam_mask in batch_cam_masks] # cls, [3, w, h]
@@ -49,9 +52,10 @@ def refine_input_by_cam(args, model, image, mask, cam, aug_smooth=True):
             updated_input_tensor[batch_idx, s:s+3,] = inputs_after_soft_addon
     return updated_input_tensor
 
-def get_pseudo_label(params, cam):
+def get_pseudo_label(params, multi_task_model):
     inputs, batch_preds, updated_image = params['inputs'], params['batch_preds'], params['refined']
     pseudo_labels = []
+    target_layers = [multi_task_model.module.SharedNet.base_model[-1][-1]] # .module. if use dataparallel
     for i, pred in enumerate(batch_preds):
         orig_image = inputs["image"][i][0].clone()
         orig_mask = inputs['mask'][i][0].clone()
@@ -61,7 +65,8 @@ def get_pseudo_label(params, cam):
             if OrgLabels[cls] == 'BackGround':
                 continue
             targets = [ClassifierOutputTarget(cls)]
-            grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=False)
+            with GradCAM(model=multi_task_model, use_cuda=params['device'], target_layers=target_layers) as cam:
+                grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=False)
             grayscale_cam = grayscale_cam[0, :]
             
             bg_score[cls + 1] = post_process_cam(cls, grayscale_cam, orig_mask, orig_image)

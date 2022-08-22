@@ -29,8 +29,8 @@ def calculate_classification_metrics(outputs, labels):
 
 def calculate_roc(outputs, labels):
     # [batch, class]
-    predicted = outputs.cpu().detach().numpy()
-    gt = labels.cpu().detach().numpy()
+    predicted = np.array(outputs)
+    gt = np.array(labels)
     print(gt.sum(axis = 0), np.round(predicted).sum(axis = 0), gt.shape)
     # drop background class as they are all 1 then eroor roc
     if OrgLabels[-1] == 'BackGround':
