@@ -48,12 +48,8 @@ def diff_map_for_att(orig_tensor, gan_tensor, mask_tensor):
     normalized_orig = normalized_batch_tensor(normalized_orig)
     normalized_gan = normalized_batch_tensor(normalized_gan)
     
-    # TODO: apply mask to mask out the background
     abs_diff = torch.abs(normalized_orig - normalized_gan)
     mask_out_diff = abs_diff * mask_tensor
-    # vutils.save_image(normalized_orig, 'examples/norm.png', normalize=False, scale_each=True)
-    # vutils.save_image(normalized_gan, 'examples/norm_gan.png', normalize=False, scale_each=True)
-    # vutils.save_image(abs_diff, 'examples/diff.png', normalize=False, scale_each=True)
 
     return mask_out_diff
 
@@ -94,9 +90,9 @@ def post_process_cam(resized_cam, orig_mask):
     
     return norm_masked_cam
 class CAMGeneratorAndSave():
-    def __init__(self, opts, cam, epoch=None) -> None:
+    def __init__(self, opts, multi_task_model, epoch=None) -> None:
         self.opts = opts
-        self.cam = cam
+        self.multi_task_model = multi_task_model
         self.epoch = epoch
         non_background_names = [x for x in OrgLabels if 'BackGround' != x]
         self.lesion_classes = [OrgLabels.index(name) for name in non_background_names]
@@ -105,31 +101,33 @@ class CAMGeneratorAndSave():
         self.epoch = epoch
         
     def get_cam_results_per_class(self, orig_img, orig_mask, ground_true_classes):
-        save_class_name = ''
         save_cam_in_row = []
-        bg_score = [np.ones_like(orig_img) * out_cam_pred_alpha] * (get_num_classes() + 1) # resc = 1 + 2 length
-        
         rgb_img = (orig_img / 255).copy()
         if (rgb_img.ndim == 2):
             rgb_img = np.repeat(rgb_img[..., np.newaxis], 3, -1)
-        
+            
+        target_layers = [self.multi_task_model.module.ClassNet.postatt]#[self.multi_task_model.module.base_model[-1][-1]] # .module. if use dataparallel
+        norm_cam_list = []
         for cls in range(len(OrgLabels)):
             '''Generate all cams except the ones that are not in ground true classes'''    
             if OrgLabels[cls] == 'BackGround' or cls not in ground_true_classes:
                 continue
             targets = [ClassifierOutputTarget(cls)]
-            self.cam.model.module.assign_conditions(True, False)
-            grayscale_cam = self.cam(input_tensor=self.updated_image,targets=targets,eigen_smooth=False, aug_smooth=False) #(h,w)
-            cam_res = grayscale_cam[0, :].copy()
+            
+            with GradCAM(model=self.multi_task_model, use_cuda="cuda", target_layers=target_layers) as cam:
+                cam.model.module.assign_conditions(True, False)
+                grayscale_cam = cam(input_tensor=self.updated_image,targets=targets, eigen_smooth=False, aug_smooth=False) #(h,w) and  [0, x]
+            # import pdb; pdb.set_trace()
+            cam_res = grayscale_cam[0, :]
             resized_cam = F.interpolate(torch.from_numpy(cam_res).unsqueeze(0).unsqueeze(0), size=orig_mask.shape, mode='bilinear', align_corners=False)[0,0].numpy()
-            bg_score[cls + 1] = post_process_cam(resized_cam, orig_mask)
+            single_norm_cam = post_process_cam(resized_cam, orig_mask)
+            norm_cam_list.append(single_norm_cam)
 
             visualization = show_cam_on_image(rgb_img, resized_cam, use_rgb=True)
             cam_image = cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
             save_cam_in_row.append(cam_image)
-            save_class_name =  save_class_name + '_' + OrgLabels[cls]
-
-        pred_labels = np.argmax(np.array(bg_score), axis=0) # [0 - num_class]
+        pred_with_bg_score = [np.ones_like(norm_cam_list[0]) * out_cam_pred_alpha] + norm_cam_list # (K + 1, [h, w])
+        pred_labels = np.argmax(np.array(pred_with_bg_score), axis=0) # [0 - num_class]
         
         color_mask = np.zeros_like(rgb_img)
         for i_cls in range(1, get_num_classes() + 1):
@@ -140,7 +138,7 @@ class CAMGeneratorAndSave():
         dst = cv2.addWeighted((rgb_img * 255).astype(np.uint8), 1, color_mask.astype(np.uint8), 0.7, 0)
         save_cam_in_row.append(dst)
         
-        return save_class_name, save_cam_in_row, pred_labels
+        return save_cam_in_row, pred_labels
     
     def save_cam_process(self, ground_true_classes, batch_nb):
         img_name = self.inputs["path"][batch_nb].split('/')[-1]
@@ -169,13 +167,9 @@ class CAMGeneratorAndSave():
             save_updated_img = self.updated_image[batch_nb].reshape(-1,3,w, h)
             vutils.save_image(save_updated_img, save_path + '/epoch{0}_refined_{1}.jpg'.format(self.epoch, truth_label), normalize=True, scale_each=True)
         
-        save_class_name, save_cam_in_row, pred_labels = self.get_cam_results_per_class(orig_img, orig_mask, ground_true_classes)
-        if (len(save_cam_in_row)):
-            im_h = cv2.hconcat(save_cam_in_row)
-            if self.is_inference:
-                cv2.imwrite(save_path + '/{0}.jpg'.format(save_class_name), im_h)
-            else: cv2.imwrite(save_path + '/epoch{0}_{1}.jpg'.format(self.epoch, save_class_name), im_h)
-        return convert_resc_labels(orig_annot), pred_labels
+        save_cam_in_row, pred_labels = self.get_cam_results_per_class(orig_img, orig_mask, ground_true_classes)
+        
+        return convert_resc_labels(orig_annot), pred_labels, save_cam_in_row, save_path
     
     def get_cam_and_save(self, params, is_inference=False):
         # batch_preds [BC] B: batch, C: Class
@@ -183,18 +177,26 @@ class CAMGeneratorAndSave():
         ready_pred_4d = []
         gt = []
         self.is_inference = is_inference
-        for batch_nb, _ in enumerate(batch_preds):
+        for batch_nb, single_pred in enumerate(batch_preds):
             ground_true_classes = [i for i,v in enumerate(self.inputs['labels'][batch_nb]) if v > 0.5]
             # only calculate and save for ground truth lesion images
             if not len(set(self.lesion_classes) & set(ground_true_classes)):
                 continue
-            gt_labels, pred_labels = self.save_cam_process(ground_true_classes, batch_nb)
+            gt_labels, pred_labels, save_cam_in_row, save_path = self.save_cam_process(ground_true_classes, batch_nb)
             gt.append(gt_labels)
             ready_pred_4d.append(pred_labels)
+            
+            single_pred_cls = [i for i,v in enumerate(single_pred) if v > 0.5]
+            save_class_name =  '_'.join([OrgLabels[cls] for cls in single_pred_cls if OrgLabels[cls] != 'BackGround'])
+            if (len(save_cam_in_row)):
+                im_h = cv2.hconcat(save_cam_in_row)
+                if self.is_inference:
+                    cv2.imwrite(save_path + '/pred_{0}.jpg'.format(save_class_name), im_h)
+                else: cv2.imwrite(save_path + '/epoch{0}_{1}.jpg'.format(self.epoch, save_class_name), im_h)
         return gt, ready_pred_4d
 
 
-def save_models(args, epoch, cam_model, cam_optimizer, is_best=False):
+def save_models(args, epoch, multi_task_model, multi_optimizer, is_best=False):
     save_path = f'./{args.save_folder}/weights'
     save_name = 'best' if is_best else epoch + 1
     if not os.path.exists(save_path):
@@ -202,8 +204,8 @@ def save_models(args, epoch, cam_model, cam_optimizer, is_best=False):
     torch.save({
         'epoch': epoch,
         'args': args,
-        'state_dict': cam_model.module.state_dict(),
-        'optimizer': cam_optimizer.state_dict(),
+        'state_dict': multi_task_model.module.state_dict(),
+        'optimizer': multi_optimizer.state_dict(),
     }, save_path + "/{0}.pwf".format(save_name)) 
 
 def save_tensorboard(tb, loss_dict, mark_epoch, include_valid):

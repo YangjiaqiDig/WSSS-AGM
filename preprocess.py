@@ -221,7 +221,20 @@ def generate_mask_resc():
     #     res = generate_background_mask(item)
     #     cv.imwrite('RESC/mask/valid/{}'.format(image_name), res)
 
-def generate_healthy_gan_resc():
+def genearte_annotation_for_our_dataset():
+    import json, os, glob
+    from PIL import Image, ImageDraw
+    import numpy as np
+    # {'id': 0, 'iscrowd': 0, 'image_id': 1, 'category_id': 1, 'segmentation': [[354.7883817427385, 179.05394190871368, 359.46519133241105, 184.3706777316735, 364.04979253112026, 175.96680497925308, 359.93360995850617, 173.90871369294604, 356.84647302904557, 174.93775933609956]], 'bbox': [354.7883817427385, 173.90871369294604, 9.261410788381738, 10.461964038727473], 'area': 53.01791176689983}
+    # [{'id': 1, 'name': 'IRF'}, {'id': 2, 'name': 'SRF'}, {'id': 3, 'name': 'HRD'}, {'id': 4, 'name': 'EZ disruption'}, {'id': 5, 'name': 'RPE '}]
+    
+    all_labels = json.load(open('datasets/our_dataset/annotations.json', 'r'))
+    print(all_labels.keys())
+    print(all_labels['info'])
+    print(len(all_labels['images']))
+    print(len(all_labels['annotations']))
+    print(all_labels['annotations'][0])
+    print(all_labels['categories'])
     return
 
 if __name__ == "__main__":
@@ -229,4 +242,5 @@ if __name__ == "__main__":
     # filter_noise()
     # remove_background()
     # random_seperate_test()
-    generate_mask_resc()
+    # generate_mask_resc()
+    genearte_annotation_for_our_dataset()

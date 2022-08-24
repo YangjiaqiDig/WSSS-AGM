@@ -1,6 +1,3 @@
-from this import d
-from turtle import forward, pd
-from xml.etree.ElementInclude import include
 import torch.nn as nn
 import torchvision.models as models
 import torch
@@ -11,16 +8,6 @@ num_channels_fc = {
     'resnet18': 512,
     'resnet50': 2048
 }
-
-class BaseModel(nn.Module):
-    def __init__(self, backbone, num_input_channel):
-        super(BaseModel, self).__init__()
-        self.base_model = backbone  # take the model without classifier
-        self.base_model.conv1 = nn.Conv2d(num_input_channel, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        self.base_model = torch.nn.Sequential(*(list(self.base_model.children())[:-2]))
-    def forward(self, x):
-        y = self.base_model(x)
-        return y
 
 class SegmentationBlock(nn.Module):
     def __init__(self, backbone_name, num_class):
@@ -45,11 +32,47 @@ class SegmentationBlock(nn.Module):
         seg_out = self.conv_final(x)
 
         return seg_out
+class DoubleConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
 
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+class Down(nn.Module):
+    """Downscaling with maxpool then double conv"""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool2d(2),
+            DoubleConv(in_channels, out_channels)
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+    
 class AttentionBlock(nn.Module):
-    def __init__(self, in_channels, kernel_size=7, num_heads=4, image_size=512, inference=False) -> None:
+    def __init__(self, in_channels, kernel_size=7, num_heads=4, image_size=16, inference=False) -> None:
         super(AttentionBlock, self).__init__()
-        self.conv1 = nn.Conv2d(3, in_channels, kernel_size=3, padding=1, stride=1)
+        # self.conv1 = nn.Conv2d(3, in_channels, kernel_size=3, padding=1, stride=1)
+        self.inc = DoubleConv(3, 64)
+        self.down1 = Down(64, 128)
+        self.down2 = Down(128, 256)
+        self.down3 = Down(256, 512)
+        self.down4 = Down(512, 1024)
+        self.down5 = Down(1024, 2048)
         
         self.kernel_size = min(kernel_size, image_size) # receptive field shouldn't be larger than input H/W         
         self.num_heads = num_heads
@@ -68,18 +91,26 @@ class AttentionBlock(nn.Module):
         self.rel_encoding_h = nn.Parameter(torch.randn(self.dk // 2, self.kernel_size, 1), requires_grad=True)
         self.rel_encoding_w = nn.Parameter(torch.randn(self.dk // 2, 1, self.kernel_size), requires_grad=True)
         
+        self.softmax = nn.Softmax2d()
         # later access attention weights
         self.inference = inference
         if self.inference:
             self.register_parameter('weights', None)
         
-    def forward(self, input_x):
-        batch_size, _, height, width = input_x.size()
-        x = self.conv1(input_x)
+    def forward(self, input_x): # batch, 3, 512, 512
+        # x = self.conv1(input_x)
+        x = self.inc(input_x)
+        x2 = self.down1(x)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x5 = self.down4(x4)
+        x6 = self.down5(x5)
+        
+        batch_size, _, height, width = x6.size()
         # Compute k, q, v
-        padded_x = F.pad(x, [(self.kernel_size-1)//2, (self.kernel_size-1)-((self.kernel_size-1)//2), (self.kernel_size-1)//2, (self.kernel_size-1)-((self.kernel_size-1)//2)])
+        padded_x = F.pad(x6, [(self.kernel_size-1)//2, (self.kernel_size-1)-((self.kernel_size-1)//2), (self.kernel_size-1)//2, (self.kernel_size-1)-((self.kernel_size-1)//2)])
         k = self.k_conv(padded_x)
-        q = self.q_conv(x)
+        q = self.q_conv(x6)
         v = self.v_conv(padded_x)
         # Unfold patches into [BS, num_heads*depth, horizontal_patches, vertical_patches, kernel_size, kernel_size]
         k = k.unfold(2, self.kernel_size, 1).unfold(3, self.kernel_size, 1)
@@ -105,38 +136,52 @@ class AttentionBlock(nn.Module):
         
         if self.inference:
             self.weights = nn.Parameter(weights)
-        
+
         attn_out = torch.matmul(weights, v.transpose(4, 5)) 
         attn_out = attn_out.reshape(batch_size, -1, height, width)
+        attn_out = self.softmax(attn_out) # TODO: maybe need remove this
+
         return attn_out
     
 
 class ResNetBlock(nn.Module):
     def __init__(self, backbone_name, num_class):
         super(ResNetBlock, self).__init__()  
-        self.att = AttentionBlock(32)
-        self.maxpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))#nn.MaxPool2d(kernel_size=7, stride=7, padding=0)
-        self.fc = nn.Linear(num_channels_fc[backbone_name], num_class) # 512 fore resent18
-        self.sigmoid = nn.Sigmoid()  
-        self.conv_expand = nn.Conv2d(32, num_channels_fc[backbone_name], kernel_size=3, padding=1, stride=1)
+        self.att = AttentionBlock(num_channels_fc[backbone_name])
+        self.postatt = nn.Sequential(
+            nn.Conv2d(num_channels_fc[backbone_name], 1024, kernel_size=3, padding=1, stride=1),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(inplace=True)
+        )
+        self.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))#nn.MaxPool2d(kernel_size=7, stride=7, padding=0)
+        self.cls = nn.Sequential(
+            nn.Linear(1024, 512, bias=True), # num_channels_fc[backbone_name], 512 for resent18
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5, inplace=False),
+            nn.Linear(512, num_class, bias=True)
+        )
 
     def forward(self, base_res, diff_tensor=None):
-        att_enhance = base_res
+        att_enhance = base_res # batch, 2048, 16, 16
         if diff_tensor is not None:
-            att_res = self.att(diff_tensor)
-            att_scale = F.interpolate(att_res, size=base_res.shape[-2:], mode='bilinear', align_corners=False)
-            att_enhance = base_res + self.conv_expand(att_scale)
+            att_res = self.att(diff_tensor) # batch 32, 512, 512
+            att_enhance = base_res + att_res
+            att_enhance = self.postatt(att_enhance)
         
-        max_x = self.maxpool(att_enhance)
+        max_x = self.avgpool(att_enhance) # batch, 2048, 1, 1
         max_x = max_x.view(max_x.size(0), -1)
-        fc_x = self.fc(max_x)
-        return fc_x
+        
+        pred_output = self.cls(max_x)
+        return pred_output
 
 class MultiTaskModel(nn.Module):
     def __init__(self, backbone, num_class, num_input_channel=3, backbone_name='resnet18'):
         super(MultiTaskModel, self).__init__()
         self.backbone_name = backbone_name
-        self.SharedNet = BaseModel(backbone, num_input_channel)
+        self.base_model = backbone  # take the model without classifier
+        self.base_model.conv1 = nn.Conv2d(num_input_channel, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.base_model = torch.nn.Sequential(*(list(self.base_model.children())[:-2]))
+        
         self.ClassNet = ResNetBlock(backbone_name, num_class)
         self.SegNet = SegmentationBlock(backbone_name, num_class)
         self.cls_only = False
@@ -155,9 +200,10 @@ class MultiTaskModel(nn.Module):
             input_tensor = concated_tensors
             diff_tensor = None
             
-        base_output = self.SharedNet(input_tensor)
+        base_output = self.base_model(input_tensor)
         # classification output
         multi_label_pred = self.ClassNet(base_output, diff_tensor)
+        
         if self.cls_only:
             return multi_label_pred
         
@@ -171,12 +217,14 @@ class MultiTaskModel(nn.Module):
 
 if __name__ == "__main__":
     RESNet = models.resnet50(pretrained=True)
-    MultiModel = MultiTaskModel(RESNet, num_class=5, num_input_channel=3, backbone_name='resnet50')
+    # print(RESNet)
+    MultiModel = MultiTaskModel(RESNet, num_class=5, num_input_channel=6, backbone_name='resnet50')
     print(MultiModel)
-    input_x = torch.rand(2, 3, 512, 512)
+    input_x = torch.rand(2, 6, 512, 512)
     input_diff = torch.rand(2, 3, 512, 512)
-    cls_pred, seg_pred = MultiModel(input_x, include_segment=True, diff_tensor=input_diff)
-    print(cls_pred.shape, seg_pred.shape)
+    concated_tensors =  torch.cat((input_x, input_diff), dim=1)
+    cls_pred, seg_pred = MultiModel(concated_tensors)
+    print(cls_pred.shape, seg_pred)
 
 
     # seg_model.eval()

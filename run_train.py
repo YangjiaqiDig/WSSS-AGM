@@ -12,7 +12,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 CUDA_DEVICE_ORDER='PCI_BUS_ID'
-DEVICE_NR = '0,1,2,3'
+DEVICE_NR = '1,2,3,0'
 os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 logging.basicConfig(level=logging.DEBUG)
 
@@ -92,10 +92,9 @@ class Train():
         total_cls_loss_val, total_seg_loss_val = 0, 0
         gt_list = []
         pred_list = []
-        target_layers = [multi_task_model.module.SharedNet.base_model[-1][-1]] # .module. if use dataparallel
-        with GradCAM(model=multi_task_model, use_cuda=self.device, target_layers=target_layers) as cam:
-            CAMGenerationModule = CAMGeneratorAndSave(opts=self.args, cam=cam)
-            CAMGenerationModule.set_epoch(epoch)
+
+        CAMGenerationModule = CAMGeneratorAndSave(opts=self.args, multi_task_model=multi_task_model)
+        CAMGenerationModule.set_epoch(epoch)
         gt_img_list, cam_img_list = [], []
         tensor_for_att = None
         for batch, data in tqdm(enumerate(testloader), total=len(testloader)):
@@ -229,16 +228,15 @@ class Train():
                                           num_input_channel=self.num_input_channel, 
                                           backbone_name=self.args.backbone)
         
-        multi_task_model = nn.DataParallel(multi_task_model)
-
         if self.args.continue_train:
             reload_epoch = 'best' if self.args.ckp_epoch == 'best' else 40
             print('Loading pretrained model from checkpoint {0}/weights/{1}.pwf'.format(self.args.check_point, reload_epoch))
             checkpoint = torch.load('{0}/weights/{1}.pwf'.format(self.args.check_point, reload_epoch))   
             multi_task_model.load_state_dict(checkpoint['state_dict'])
-        
+            
+        multi_task_model = nn.DataParallel(multi_task_model)
         multi_task_model = multi_task_model.to(self.device)
-
+        
         multi_optimizer = optim.SGD(multi_task_model.parameters(), lr=self.args.lr, momentum=0.9)
 
         lr_scheduler = torch.optim.lr_scheduler.StepLR(multi_optimizer, step_size=self.args.lr_schedule['step'], gamma=self.args.lr_schedule['gamma'])
