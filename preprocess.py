@@ -179,7 +179,7 @@ def remove_background():
         # output[output >= 240] = 0
         # cv.imwrite('test.png', output)
     print(count)
-    return;
+    return
 
 def random_seperate_test():
     labels_table = pd.read_csv('datasets/our_dataset/labels.csv')
@@ -192,7 +192,7 @@ def random_seperate_test():
     print(selected)
     combined_df = combined_df.sort_values(by=[ 'Definite DRIL'], ascending=False)
     print(combined_df.iloc[:30])
-#3882196|3565572|4240465|224974|2205167|3491563|DR91|DR10
+    #3882196|3565572|4240465|224974|2205167|3491563|DR91|DR10
 
 def generate_mask_datasets():
     list_of_data = glob.glob("datasets/our_dataset/original/train/*")
@@ -207,34 +207,81 @@ def generate_mask_datasets():
         res = generate_background_mask(item)
         cv.imwrite('datasets/our_dataset/mask/test/{}.png'.format(image_name), res)
 
-def generate_mask_resc():
-    list_of_data = glob.glob("datasets/2015_BOE_Chiu/segment_annotation/images/*")
-    # print(list_of_data)
-    for item in list_of_data:
-        image_name = item.split('/')[-1]
-        res = generate_background_mask(item)
-        cv.imwrite('datasets/2015_BOE_Chiu/segment_annotation/mask/{}'.format(image_name), res)
+def generate_mask_general(dirs, save_dir):
+    for dir_i in dirs:
+        list_of_data = glob.glob(dir_i)
+        # print(list_of_data)
+        for item in list_of_data:
+            image_name = item.split('/')[-1]
+            res = generate_background_mask(item)
+            cv.imwrite('{}/{}'.format(save_dir, image_name), res)
 
-    # list_of_test = glob.glob("RESC/valid/original_images/*")
-    # for item in list_of_test:
-    #     image_name = item.split('/')[-1]
-    #     res = generate_background_mask(item)
-    #     cv.imwrite('RESC/mask/valid/{}'.format(image_name), res)
-
-def genearte_annotation_for_our_dataset():
-    import json, os, glob
-    from PIL import Image, ImageDraw
-    import numpy as np
-    # {'id': 0, 'iscrowd': 0, 'image_id': 1, 'category_id': 1, 'segmentation': [[354.7883817427385, 179.05394190871368, 359.46519133241105, 184.3706777316735, 364.04979253112026, 175.96680497925308, 359.93360995850617, 173.90871369294604, 356.84647302904557, 174.93775933609956]], 'bbox': [354.7883817427385, 173.90871369294604, 9.261410788381738, 10.461964038727473], 'area': 53.01791176689983}
-    # [{'id': 1, 'name': 'IRF'}, {'id': 2, 'name': 'SRF'}, {'id': 3, 'name': 'HRD'}, {'id': 4, 'name': 'EZ disruption'}, {'id': 5, 'name': 'RPE '}]
     
-    all_labels = json.load(open('datasets/our_dataset/annotations.json', 'r'))
-    print(all_labels.keys())
-    print(all_labels['info'])
-    print(len(all_labels['images']))
-    print(len(all_labels['annotations']))
-    print(all_labels['annotations'][0])
-    print(all_labels['categories'])
+cat_mapping = {1: 'IRF', 2: 'SRF', 3: 'HRD', 4: 'EZ disrupted', 5: 'RPE'}
+def generate_from_coco(image_id, coco, gt_labels, cat_ids, expert):
+    
+    img = coco.imgs[image_id]
+    file_name = img['file_name']
+    
+    found_gt = gt_labels[gt_labels['img']==file_name].to_dict('records')[0]    
+    anns_ids = coco.getAnnIds(imgIds=img['id'], catIds=cat_ids, iscrowd=None)
+    anns = coco.loadAnns(anns_ids)
+    
+    anns_df = pd.DataFrame(anns)
+    anns_df = anns_df[['category_id', 'area']]
+    anns_df = anns_df.groupby('category_id').agg('sum').reset_index().to_dict('records')
+    anns_img = np.zeros((img['height'],img['width']))
+    for item in anns_df:
+        col_name = '{}_{}'.format(expert, cat_mapping[item['category_id']])
+        area_name = '{}_area_{}'.format(expert, cat_mapping[item['category_id']])
+        found_gt[col_name] = 1
+        found_gt[area_name] = item['area']
+           
+    # mask = coco.annToMask(anns[0])
+    for ann in anns:
+        anns_img = np.maximum(anns_img,coco.annToMask(ann)*ann['category_id'])
+        # mask += coco.annToMask(ann)
+    save_mask = Image.fromarray((anns_img / 5 * 255).astype(np.uint8))
+    i_name = file_name.split('.')[0]
+    save_mask.save('annotation_test/{}_{}.png'.format(i_name, expert))
+    return found_gt
+
+def genearte_annotation_for_our_dataset(gt_labels):
+    from pycocotools.coco import COCO
+    import numpy as np
+    # "categories":[{"id":1,"name":"IRF"},{"id":2,"name":"SRF"},{"id":3,"name":"HRD"},{"id":4,"name":"EZ disruption"},{"id":5,"name":"RPE "}]}
+    coco = COCO('datasets/our_dataset/annotations.json')
+    coco_2 = COCO('datasets/our_dataset/annotation_2.json')
+    cat_ids = coco.getCatIds() # 1,2,3,4,5
+    res_list = []
+    for image_id in range(1, 101):
+        # new_labeled = {'SRF_new': 0, 'IRF_new': 0, 'EZ disrupted_new': 0, 'HRD_new': 0}
+        updated_res = generate_from_coco(image_id, coco, gt_labels, cat_ids, 'mina')
+        res_list.append(updated_res)
+    new_df = pd.DataFrame(res_list)
+    
+    res_list = []
+    for image_id in range(1, 101):
+        # new_labeled = {'SRF_new': 0, 'IRF_new': 0, 'EZ disrupted_new': 0, 'HRD_new': 0}
+        updated_res = generate_from_coco(image_id, coco_2, new_df, cat_ids, 'meera')
+        res_list.append(updated_res)
+    new_df = pd.DataFrame(res_list)
+    new_df = new_df.fillna(0)
+    new_df.to_csv('annot_analysis.csv')
+    # all_same = [x['same'] for x in res_list if x['same']]
+    # all_same_2 = [x['same_2'] for x in res_list if x['same_2']]
+    # all_expert_same = [x['expert_same'] for x in res_list if x['expert_same']]
+    # print(res_list[:10])
+    # print(sum(all_same), sum(all_same_2), sum(all_expert_same))
+
+def analyze_annotations():
+    from sklearn import metrics
+    import matplotlib.pyplot as plt
+    df = pd.read_csv('annot_analysis.csv', index_col=0)
+    confusion_matrix = metrics.confusion_matrix(df['IRF'], df['mina_IRF'])
+    cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = [False, True])
+    
+    print(df[df['IRF']==df['mina_IRF']])
     return
 
 if __name__ == "__main__":
@@ -242,5 +289,15 @@ if __name__ == "__main__":
     # filter_noise()
     # remove_background()
     # random_seperate_test()
-    # generate_mask_resc()
-    genearte_annotation_for_our_dataset()
+    dirs = ["datasets/oct_kaggle/train/0.normal/*"]
+    generate_mask_general(dirs, "datasets/oct_kaggle/normal_mask")
+    # import os
+    # images = os.listdir('datasets/our_dataset/original/test/')
+    # lesion_images = [x for x in images if 'NORMAL' not in x]
+    # first_labels = pd.read_csv('datasets/our_dataset/labels.csv')
+    # first_labels = first_labels[first_labels['img'].isin(lesion_images)].drop(['Retinal Traction', 'Definite DRIL', 'Questionable DRIL'], axis=1)
+    # print(first_labels.sum())
+
+    # genearte_annotation_for_our_dataset(first_labels)
+    
+    # analyze_annotations()

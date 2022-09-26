@@ -3,13 +3,48 @@ import numpy as np
 from PIL import Image, ImageEnhance
 from torch.utils.data import Dataset
 from torchvision import transforms
-from utils import OrgLabels, convert_resc_pixel2image
+from utils import OrgLabels
 import torch
 import pandas as pd
 import random
 import logging
+import torchvision.transforms.functional as TF
+
 # pd.set_option("display.max_rows", None)
 logging.getLogger('PIL').setLevel(logging.WARNING)
+
+def img_transform(img, mask, is_size, data_type):
+    # to PIL
+    to_pil = transforms.ToPILImage()
+    img, mask = to_pil(img), to_pil(mask)
+    
+    # Resize 
+    resize_img = transforms.Resize(is_size)
+    resize_mask = transforms.Resize(is_size, interpolation=Image.NEAREST)
+    img, mask = resize_img(img), resize_mask(mask)
+    
+    if data_type == 'train':
+        # Random color for image
+        color_jitter = transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)
+        img = color_jitter(img)
+        
+        # Random flip
+        if random.random() > 0.5:
+            img, mask = TF.hflip(img), TF.hflip(mask)
+        
+        # Random rotate
+        rotate = transforms.RandomRotation(degrees=60)
+        state = torch.get_rng_state()
+        img = rotate(img)
+        torch.set_rng_state(state)
+        mask = rotate(mask)
+    
+    # to tensor
+    to_tensor = transforms.ToTensor()
+    img, mask = to_tensor(img), to_tensor(mask)
+    
+    return img, mask
+
 class OCTDataset(Dataset): 
     def __init__(self, args, data_type, infer_list=[]):
         self.file_list = {'train': glob.glob("{}/train/*".format(args.root_dirs)), 'test': glob.glob("{}/test/*".format(args.root_dirs))}
@@ -23,14 +58,6 @@ class OCTDataset(Dataset):
             self.labels_table.loc[self.labels_table['EZ'] > 1, 'EZ'] = 1
         if 'BackGround' in OrgLabels:
             self.labels_table['BackGround'] = 1
-            
-        if data_type == 'train':
-            self.transform = train_transform(args.is_size, False)
-            self.transform_mask = train_transform(args.is_size, True)
-        else:
-            self.transform= valid_transform(args.is_size, False)
-            self.transform_mask= valid_transform(args.is_size, True)
-        self.roots = args.root_dirs
         # self.input_structure = args.input_structure
         self.data_type = data_type
         self.args = args
@@ -48,12 +75,7 @@ class OCTDataset(Dataset):
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
         image_name = data_path.split('/')[-1]
-        seed = np.random.randint(2147483647) 
-        random.seed(seed) 
-        torch.manual_seed(seed)
-        image_tensor = self.transform(image_arr)
-        torch.manual_seed(seed)
-        mask_tensor = self.transform_mask(mask)
+        image_tensor, mask_tensor = img_transform(image_arr, mask, self.args.is_size, self.data_type)
         
         if image_name in self.labels_table['img'].values:
             labels_df = self.labels_table.loc[self.labels_table['img'] == image_name]
@@ -68,175 +90,91 @@ class RESCDataset(Dataset):
     def __init__(self, args, data_type, infer_list=[]):
         self.file_list = {'train': glob.glob("{}/train/original_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/original_images/*".format(args.root_dirs))}
         self.mask_list = {'train': glob.glob("{}/train/*".format(args.mask_dir)), 'test': glob.glob("{}/valid/*".format(args.mask_dir))}
-        self.labels_list = {'train': glob.glob("{}/train/label_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/label_images/*".format(args.root_dirs))}
-
+        self.labels_list = np.load('{}/resc_cls_labels.npy'.format(args.root_dirs), allow_pickle=True).item()
         if data_type == 'inference':
             self.file_list = {'inference': ["{}/valid/original_images/{}".format(args.root_dirs, item) for item in infer_list]}
             self.mask_list = {'inference': ["{}/valid/{}".format(args.mask_dir, item) for item in infer_list]}
-            self.labels_list = {'inference': ["{}/valid/label_images/{}".format(args.root_dirs, item) for item in infer_list]}
-        if data_type == 'train':
-            self.transform = train_transform(args.is_size, False)
-            self.transform_mask = train_transform(args.is_size, True)
-        else:
-            self.transform= valid_transform(args.is_size, False)
-            self.transform_mask = valid_transform(args.is_size, True)
-        self.roots = args.root_dirs
         self.data_type = data_type
         self.args = args
 
     def __getitem__(self, idx):
         data_path = sorted(self.file_list[self.data_type])[idx]
         mask_path = sorted(self.mask_list[self.data_type])[idx]
-        label_path =  sorted(self.labels_list[self.data_type])[idx]
         
         image = Image.open(data_path)
-        label_img = Image.open(label_path)
         mask = np.asarray(Image.open(mask_path))
         # increase contrast of image
         if self.args.contrast:
             image = ImageEnhance.Contrast(image).enhance(2)
-        image_arr = np.asarray(image)
-        label_arr = np.asarray(label_img)
-        
+        image_arr = np.asarray(image)        
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
-            
-        seed = np.random.randint(2147483647) 
-        random.seed(seed) 
-        torch.manual_seed(seed)
-        image_tensor = self.transform(image_arr)
-        torch.manual_seed(seed)
-        mask_tensor = self.transform_mask(mask)
         
-        image_label = convert_resc_pixel2image(label_arr)
-        return {'image': image_tensor, 'labels': torch.FloatTensor([image_label[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor}
+        image_tensor, mask_tensor = img_transform(image_arr, mask, self.args.is_size, self.data_type)
+        
+        img_name = data_path.split('/')[-1].split('.')[0]
+        image_label = np.append(self.labels_list[img_name], [1]) if 'BackGround' in OrgLabels else self.labels_list[img_name]
+        return {'image': image_tensor, 'labels': torch.from_numpy(image_label), 'path': data_path, 'mask': mask_tensor}
 
     def __len__(self):
         return len(self.file_list[self.data_type])
 
 class DukeDataset(Dataset):
     def __init__(self, args, data_type, infer_list=[]):
-        train_from_resc_label_pth = 'baseline_models/SEAM/voc12/resc_cls_labels.npy'
-        train_from_resc_label = np.load(train_from_resc_label_pth, allow_pickle=True).item()
-        resc_srf_image_name_list = [k for k, v in train_from_resc_label.items() if v[0]==1]
-        
-        train_from_our_label_path = 'datasets/our_dataset/labels.csv'
-        train_from_our_label = pd.read_csv(train_from_our_label_path)
-        ours_edema_image_name_list = train_from_our_label[(train_from_our_label['SRF']==1)| (train_from_our_label['IRF']==1)]['img']
-        print(len(ours_edema_image_name_list))
-        ss
-        self.file_list = {'train': glob.glob("{}/train/original_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/original_images/*".format(args.root_dirs))}
-        self.mask_list = {'train': glob.glob("{}/train/*".format(args.mask_dir)), 'test': glob.glob("{}/valid/*".format(args.mask_dir))}
+        self.dataset_df = {'train': pd.read_csv('{}/train.csv'.format(args.root_dirs), index_col=0), 'test': pd.read_csv('{}/valid.csv'.format(args.root_dirs), index_col=0)}
         if data_type == 'inference':
-            self.file_list = {'inference': ["{}/valid/original_images/{}".format(args.root_dirs, item) for item in infer_list]}
-            self.mask_list = {'inference': ["{}/valid/{}".format(args.mask_dir, item) for item in infer_list]}
-        self.labels_list = {'train': glob.glob("{}/train/label_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/label_images/*".format(args.root_dirs))}
-        
-        if data_type == 'train':
-            self.transform = train_transform(args.is_size, False)
-            self.transform_mask = train_transform(args.is_size, True)
-        else:
-            self.transform= valid_transform(args.is_size, False)
-            self.transform_mask = valid_transform(args.is_size, True)
-        self.roots = args.root_dirs
+            val_df = pd.read_csv("{}/valid.csv".format(args.root_dirs), index_col=0)
+            if infer_list:
+                pat = '|'.join(r'\b{}\b'.format(x) for x in infer_list)
+                val_df = val_df[val_df['path'].str.contains(pat)]
+            self.dataset_df = {'inference': val_df}
         self.data_type = data_type
         self.args = args
 
     def __getitem__(self, idx):
-        data_path = sorted(self.file_list[self.data_type])[idx]
-        mask_path = sorted(self.mask_list[self.data_type])[idx]
-        label_path =  sorted(self.labels_list[self.data_type])[idx]
-        
-        image = Image.open(data_path)
-        label_img = Image.open(label_path)
+        target_row = self.dataset_df[self.data_type].sort_values('path').iloc[idx]
+        target_label = target_row['label']
+        target_path = target_row['path']
+        if 'BOE' in target_path:
+            mask_path = target_path.replace('/images/', '/mask/')
+        elif 'RESC' in target_path:
+            mask_path = target_path.replace('/RESC/', '/RESC/mask/').replace('original_images/', '')
+        elif 'NORMAL' in target_path:
+            mask_path = target_path.replace('train/0.normal', 'normal_mask')
+        else:
+            mask_path = target_path.replace('original', 'mask')
+        image = Image.open(target_path)
         mask = np.asarray(Image.open(mask_path))
-        # increase contrast of image
+        mask[mask>150]=255
+        mask[mask<=150]=0
+
         if self.args.contrast:
             image = ImageEnhance.Contrast(image).enhance(2)
         image_arr = np.asarray(image)
-        label_arr = np.asarray(label_img)
-        
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
-        if (label_arr.ndim == 2):
-            label_arr = np.repeat(label_arr[..., np.newaxis], 3, -1)
-
-        seed = np.random.randint(2147483647) 
-        random.seed(seed) 
-        torch.manual_seed(seed)
-        image_tensor = self.transform(image_arr)
-        torch.manual_seed(seed)
-        mask_tensor = self.transform_mask(mask)
-        
-        image_label = convert_resc_pixel2image(label_arr)
-
-        return {'image': image_tensor, 'labels': torch.FloatTensor([image_label[x] for x in OrgLabels]), 'path': data_path, 'mask': mask_tensor}
+        image_tensor, mask_tensor = img_transform(image_arr, mask, self.args.is_size, self.data_type)
+        return {'image': image_tensor, 'labels': torch.FloatTensor([target_label, 1]), 'path': target_path, 'mask': mask_tensor}
     def __len__(self):
-        return len(self.file_list[self.data_type])
- 
-def train_transform(is_size, is_mask):
-    inter = Image.NEAREST if is_mask else Image.BILINEAR
-    transform_seq = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize(is_size, interpolation=inter),
-        # transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=60),
-        transforms.ToTensor(),
-    ])
-    return transform_seq
-
-def valid_transform(is_size, is_mask):
-    inter = Image.NEAREST if is_mask else Image.BILINEAR
-    transform_seq = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize(is_size, interpolation=inter),
-        transforms.ToTensor(),
-    ])
-    return transform_seq
+        return len(self.dataset_df[self.data_type])
 
 if __name__ == "__main__":
-    # root_dirs = ["datasets/our_dataset/original/DME_1", "datasets/our_dataset/original/DME_2", "datasets/our_dataset/original/DME_3", "datasets/our_dataset/original/DME_4", "datasets/our_dataset/original/DR"]
-    # labels_table = []
-    # for root_dir in root_dirs:
-    #     labels_table.append(pd.read_csv("%s/labels.csv" % root_dir)) 
-    # labels_table = pd.concat(labels_table, ignore_index=True)
-    # labels_table.to_csv('datasets/our_dataset/labels.csv', index=False)
-    # print(labels_table)
-
-    # dataset = OCTDataset(root_dirs, transform=valid_transform())
-    # acc, f1m, f1mi = 0, 0, 0
-    # gt = [0.0, 1.0, ]#0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    # gt_dr = [0.0, 1.0,]# 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
-    # for data in dataset:
-    #     if (data["path"].split('/')[0] == "dataset_DR" ): 
-    #         gt_f = gt_dr
-    #     else: gt_f = gt
-    #     acc +=  accuracy_score(gt_f,data["labels"].numpy())
-    #     f1m += f1_score(gt_f,data["labels"].numpy(),average = 'macro', zero_division=1)
-    #     f1mi += f1_score(gt_f,data["labels"].numpy(),average = 'micro', zero_division=1)
-    # print(acc / len(dataset), f1m / len(dataset), f1mi / len(dataset))
-    
     '''
+    RESC
     Train: {'srf': 2934, 'ped': 402, 'retinal': 4664, 'health': 4296}
     Test: {'srf': 360, 'ped': 41, 'retinal': 834, 'health': 1086}
     '''
     class Args():
         def __init__(self) -> None:
-            self.root_dirs = 'RESC'
-            self.mask_dir = 'RESC/mask'
+            self.root_dirs = 'datasets/RESC'#2015_BOE_Chiu'
+            self.mask_dir = 'datasets/RESC/mask'
             self.contrast = False
-            self.is_size = (256, 256)
+            self.is_size = (512, 512)
     args = Args()
-    # resc_dataset = RESCDataset(args, 'test')
+    target_dataset = RESCDataset(args, 'train')
     # l = {'srf': 0, 'ped': 0, 'retinal': 0, 'health': 0}
-    # for idx in range(0, len(resc_dataset)):
-    #     res = resc_dataset[idx]
-    #     print(res)
-    #     import pdb; pdb.set_trace()
+    for idx in range(0, len(target_dataset)):
+        res = target_dataset[idx]
+        print(res)
+        import pdb; pdb.set_trace()
     
-    duke_dataset = DukeDataset(args, 'test')
-    
-
-
-# %%

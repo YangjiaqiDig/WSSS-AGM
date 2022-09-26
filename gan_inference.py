@@ -16,16 +16,17 @@ from gan_model import Ganomaly
 
 
 ##
-def load_gan_model(path):
+def load_gan_model(path, DEVICE_NR):
     ##
     # ARGUMENTS
     opt = Options().inference_parse()
 
     # override by inference for ARGUMENTS
     opt.batchsize = 3
-    # opt.ngpu = 3
-    # opt.gpu_ids = -1
+    opt.ngpu = len(DEVICE_NR.split(','))
+    opt.gpu_ids = DEVICE_NR
     opt.device = 'cuda'
+    # print(opt)
     # Evaluation metric. auprc | roc | f1_score
     model = Ganomaly(opt, path)
     return model

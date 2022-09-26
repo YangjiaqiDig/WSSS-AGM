@@ -2,7 +2,7 @@
 import numpy as np
 import os
 from sklearn.metrics import accuracy_score, f1_score, classification_report, roc_auc_score
-from utils import OrgLabels
+from utils import CAT_LIST, OrgLabels, get_num_classes
 from PIL import Image
 import os
 import argparse
@@ -63,9 +63,6 @@ def calculate_F1(pred_path, gt_path, numofclass):
     f1_score = sum(f1_score) / numofclass
     return f1_score
 
-
-CAT_LIST = ['background', 'SRF', 'PED', 'meanIOU']
-
 def _fast_hist(label_true, label_pred, n_class):
     mask = (label_true >= 0) & (label_true < n_class)
     hist = np.bincount(
@@ -99,8 +96,7 @@ def scores(label_trues, label_preds, n_class):
 
 def record_score(score, save_path):
     score_list = []
-
-    for i in range(3):
+    for i in range(get_num_classes()+1):
         score_list.append(score['Class IoU'][i])
         aveJ = score['Mean IoU']
     with open('{}_iou.txt'.format(save_path), 'w') as f:

@@ -1,13 +1,13 @@
-from run_train import Train
 import logging
 import os
 
 import torch
 from tqdm import tqdm
 
-CUDA_DEVICE_ORDER='PCI_BUS_ID'
-DEVICE_NR = '0,1,2,3'
-os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
+# CUDA_DEVICE_ORDER='PCI_BUS_ID'
+# DEVICE_NR = '0,1,2,3'
+# os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
+from run_train import Train
 logging.basicConfig(level=logging.DEBUG)
 from dataset import (DukeDataset, OCTDataset, RESCDataset)
 from refine_pseudo_label import refine_input_by_cam
@@ -54,10 +54,10 @@ class Inference(Train):
                         updated_image = torch.cat((image, healthy_img, tensor_for_att), dim=1)
                     else:
                         updated_image = torch.cat((image, healthy_img), dim=1)
-                if self.args.num_iteration > 0:
-                    updated_image = refine_input_by_cam(self.device, multi_task_model, updated_image, mask)
-                    
-                multi_task_model.module.assign_conditions(False, True)
+            if self.args.iter_epochs > 0:
+                updated_image = refine_input_by_cam(self.device, multi_task_model, updated_image, mask)
+            with torch.no_grad():
+                multi_task_model.assign_conditions(False)
                 cls_outputs, _ = multi_task_model(updated_image)
                 sig_prediction = self.sigmoid(cls_outputs)
 
@@ -74,7 +74,7 @@ class Inference(Train):
 if __name__ == "__main__":
     is_inference=True
     validator = Inference(is_inference)
-    validator.inference(infer_list=['sn8828_75.bmp', 'sn22697_89.bmp','sn29218_71.bmp'])
+    validator.inference(infer_list=['sn29218_78.bmp', 'sn22698_57.bmp'])
     # validator.inference()
     # validator.inference(infer_list=['DME-15307-1.jpeg',
     #                               'DME-4240465-41.jpeg', 
