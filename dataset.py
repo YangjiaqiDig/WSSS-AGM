@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image, ImageEnhance
 from torch.utils.data import Dataset
 from torchvision import transforms
-from utils import OrgLabels
+from utils import OrgLabels, get_mask_path_by_image_path
 import torch
 import pandas as pd
 import random
@@ -47,18 +47,26 @@ def img_transform(img, mask, is_size, data_type):
 
 class OCTDataset(Dataset): 
     def __init__(self, args, data_type, infer_list=[]):
-        self.file_list = {'train': glob.glob("{}/train/*".format(args.root_dirs)), 'test': glob.glob("{}/test/*".format(args.root_dirs))}
+        self.file_list = {'train': glob.glob("{}/original/train/*".format(args.root_dirs)), 'test': glob.glob("{}/original/test/*".format(args.root_dirs))}
         self.mask_list = {'train': glob.glob("{}/train/*.png".format(args.mask_dir)), 'test': glob.glob("{}/test/*.png".format(args.mask_dir))}
         if data_type == 'inference':
-            self.file_list = {'inference': ["{}/test/{}".format(args.root_dirs, item) for item in infer_list]}
+            self.file_list = {'inference': ["{}/original/test/{}".format(args.root_dirs, item) for item in infer_list]}
             self.mask_list = {'inference': ["{}/test/{}.png".format(args.mask_dir, item.split('.')[0]) for item in infer_list]}
-        self.labels_table = pd.read_csv("datasets/our_dataset/labels.csv")
-        if args.combine_ez:
-            self.labels_table['EZ'] = self.labels_table['EZ attenuated'] + self.labels_table['EZ disrupted']
-            self.labels_table.loc[self.labels_table['EZ'] > 1, 'EZ'] = 1
+        
+        if data_type == 'train':
+            self.labels_table = pd.read_csv("datasets/our_dataset/labels.csv")
+        elif args.expert_annot == 'mina':
+            self.labels_table = pd.read_csv("datasets/our_dataset/mina_labels.csv")
+        elif args.expert_annot == 'meera':
+            self.labels_table = pd.read_csv("datasets/our_dataset/meera_labels.csv")
+        elif args.expert_annot == 'both':
+            self.labels_table = pd.read_csv("datasets/our_dataset/combine_labels.csv")
+        else:
+            raise ValueError(f"No defined {args.expert_annot} annotation for NYU dataset")
+            
         if 'BackGround' in OrgLabels:
             self.labels_table['BackGround'] = 1
-        # self.input_structure = args.input_structure
+        self.disease_img_names = self.labels_table['img'].values
         self.data_type = data_type
         self.args = args
         self.normal_label = {'SRF': 0, 'IRF': 0, 'EZ attenuated': 0,  'EZ disrupted': 0,  'HRD': 0,  'RPE': 0,  'Retinal Traction': 0,  'Definite DRIL': 0,  'Questionable DRIL': 0,  'EZ': 0,  'BackGround': 1}
@@ -68,21 +76,18 @@ class OCTDataset(Dataset):
         mask_path = sorted(self.mask_list[self.data_type])[idx]
         image = Image.open(data_path)
         mask = np.asarray(Image.open(mask_path))
-        # increase contrast of image
-        if self.args.contrast:
-            image = ImageEnhance.Contrast(image).enhance(2)
         image_arr = np.asarray(image)
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
         image_name = data_path.split('/')[-1]
         image_tensor, mask_tensor = img_transform(image_arr, mask, self.args.is_size, self.data_type)
-        
-        if image_name in self.labels_table['img'].values:
+        if image_name not in self.disease_img_names:
+            labels = torch.FloatTensor([self.normal_label[x] for x in OrgLabels])
+        else:
             labels_df = self.labels_table.loc[self.labels_table['img'] == image_name]
             labels = torch.FloatTensor([labels_df[x].to_numpy()[0] for x in OrgLabels])
-        else:
-            labels = torch.FloatTensor([self.normal_label[x] for x in OrgLabels])
         return {'image': image_tensor, 'labels': labels, 'path': data_path, 'mask': mask_tensor}
+    
     def __len__(self):
         return len(self.file_list[self.data_type])
     
@@ -103,9 +108,6 @@ class RESCDataset(Dataset):
         
         image = Image.open(data_path)
         mask = np.asarray(Image.open(mask_path))
-        # increase contrast of image
-        if self.args.contrast:
-            image = ImageEnhance.Contrast(image).enhance(2)
         image_arr = np.asarray(image)        
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
@@ -135,21 +137,12 @@ class DukeDataset(Dataset):
         target_row = self.dataset_df[self.data_type].sort_values('path').iloc[idx]
         target_label = target_row['label']
         target_path = target_row['path']
-        if 'BOE' in target_path:
-            mask_path = target_path.replace('/images/', '/mask/')
-        elif 'RESC' in target_path:
-            mask_path = target_path.replace('/RESC/', '/RESC/mask/').replace('original_images/', '')
-        elif 'NORMAL' in target_path:
-            mask_path = target_path.replace('train/0.normal', 'normal_mask')
-        else:
-            mask_path = target_path.replace('original', 'mask')
+        mask_path = get_mask_path_by_image_path(target_path)
         image = Image.open(target_path)
         mask = np.asarray(Image.open(mask_path))
         mask[mask>150]=255
         mask[mask<=150]=0
 
-        if self.args.contrast:
-            image = ImageEnhance.Contrast(image).enhance(2)
         image_arr = np.asarray(image)
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
@@ -166,12 +159,11 @@ if __name__ == "__main__":
     '''
     class Args():
         def __init__(self) -> None:
-            self.root_dirs = 'datasets/RESC'#2015_BOE_Chiu'
+            self.root_dirs = 'datasets/2015_BOE_Chiu'
             self.mask_dir = 'datasets/RESC/mask'
-            self.contrast = False
             self.is_size = (512, 512)
     args = Args()
-    target_dataset = RESCDataset(args, 'train')
+    target_dataset = DukeDataset(args, 'test')
     # l = {'srf': 0, 'ped': 0, 'retinal': 0, 'health': 0}
     for idx in range(0, len(target_dataset)):
         res = target_dataset[idx]

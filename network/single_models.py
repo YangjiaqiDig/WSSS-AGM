@@ -3,7 +3,7 @@ import torchvision.models as models
 import torch
 import torch.nn.functional as F
 
-from our_models.attention_models import VitBlock, SwimTBlock
+from network.attention_models import VitBlock, SwimTBlock
 
 num_channels_fc = {"resnet18": 512, "resnet50": 2048}
 

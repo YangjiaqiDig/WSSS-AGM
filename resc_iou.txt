@@ -1,6 +1,0 @@
-class  0 background   IU 0.98
-class  1 SRF          IU 0.20
-class  2 PED          IU 0.28
-meanIOU: 0.4841137058349392
-pixelAcc: 0.9783811569213867
-meanAcc: 0.654601233205559

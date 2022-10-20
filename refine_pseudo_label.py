@@ -1,7 +1,7 @@
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 import torch
 import numpy as np
-from utils import OrgLabels, SegmentationModelOutputWrapper, post_process_cam, out_cam_pred_alpha, get_num_classes
+from utils import OrgLabels, SegmentationModelOutputWrapper, post_process_cam, get_num_classes
 from pytorch_grad_cam import GradCAM
 import torch.nn.functional as F
 
@@ -42,10 +42,6 @@ def refine_input_by_cam(device, multi_task_model, input_tensor, mask_tensor, aug
         sum_masks.add_(-min).div_(max - min + 1e-5) 
         soft_apply = sum_masks.unsqueeze(0).repeat(3, 1, 1) # (3, w, h)
         ''' BackGround CAM * normalized CAM * Original Image. does norm -> multiply order matter? '''
-        # background_mask = singel_cam_masks[-1] # Background CAM
-        # background_mask = mask_tensor[batch_idx].clone()
-        # background_mask[background_mask == 0] = 0.2
-        # soft_apply = sum_masks * background_mask # cam predicts * background constraints
         num_channels = 3#image.shape[1]
         for s in range(0, num_channels, 3):
             inputs_after_soft_addon = soft_apply * input_tensor[batch_idx, s:s+3,] # [3, w, h]
@@ -58,24 +54,28 @@ def refine_input_by_cam(device, multi_task_model, input_tensor, mask_tensor, aug
     return updated_input_tensor
 
 def get_pseudo_label(params, multi_task_model):
-    inputs, batch_preds, updated_image = params['inputs'], params['batch_preds'], params['refined']
+    retinal_mask, input_tensor, cls_labels, args = params['mask'].cpu().numpy(), params['input_tensor'], params['cls_labels'].cpu().numpy(), params['args']
     pseudo_labels = []
-    target_layers = [multi_task_model.base_model[-1][-1]] # .module. if use dataparallel
-    for i, pred in enumerate(batch_preds):
-        orig_mask = inputs['mask'][i][0].clone()
-        pred_classes = [i for i,v in enumerate(pred) if v > 0.5]        
-        norm_cam_list = []
-        for cls in pred_classes:
-            if OrgLabels[cls] == 'BackGround':
-                continue
-            targets = [ClassifierOutputTarget(cls)]
-            with GradCAM(model=multi_task_model, use_cuda=params['device'], target_layers=target_layers) as cam:
-                grayscale_cam = cam(input_tensor=updated_image,targets=targets,eigen_smooth=False, aug_smooth=False)
-            grayscale_cam = grayscale_cam[0, :]
-            resized_cam = F.interpolate(torch.from_numpy(grayscale_cam).unsqueeze(0).unsqueeze(0), size=orig_mask.shape, mode='bilinear', align_corners=False)[0,0].numpy()
-            single_norm_cam = post_process_cam(resized_cam, orig_mask)
-            norm_cam_list.append(single_norm_cam)
-        pred_with_bg_score = [np.ones_like(norm_cam_list[0]) * out_cam_pred_alpha] + norm_cam_list # (K + 1, [h, w])
-        labels = np.argmax(np.array(pred_with_bg_score), axis=0) # [0 - num_class]
-        pseudo_labels.append(labels)
+    batch_cam_masks = []
+    target_layers = multi_task_model.get_cam_target_layers() # .module. if use dataparallel
+    wrap_model = SegmentationModelOutputWrapper(multi_task_model)
+
+    for cls in range(get_num_classes()):
+        targets = [ClassifierOutputTarget(cls)] * len(input_tensor) # for all in batch return the current class cam
+        with GradCAM(model=wrap_model, use_cuda=args.device, target_layers=target_layers) as cam:
+            batch_grayscale_cam = cam(input_tensor=input_tensor,targets=targets, eigen_smooth=False, aug_smooth=True)
+        batch_cam_masks.append(batch_grayscale_cam) # cls, [batch, w, h]
+    batch_cam_masks = np.transpose(np.stack(batch_cam_masks), (1, 0, 2, 3)) # np: [batch, cls, w, h]
+    
+    for singel_cam_masks, single_retinal_mask, cls_label in zip(batch_cam_masks, retinal_mask, cls_labels):
+        norm_cams = post_process_cam(singel_cam_masks, single_retinal_mask[0]) # [cls, w, h]
+        for i in range(get_num_classes()):
+            if cls_label[i] == 0:
+                norm_cams[i] = 0
+        bg_score = [np.ones_like(norm_cams[0]) * args.out_cam_pred_alpha]
+        pred_with_bg_score = np.concatenate((bg_score, norm_cams)) # [cls+1, w, h]
+        '''Generate psuedo label by gt labels'''
+        pred_labels = np.argmax(pred_with_bg_score, axis=0)  # [0 - num_class]
+        pseudo_labels.append(pred_labels)
+    import pdb; pdb.set_trace()
     return torch.LongTensor(pseudo_labels)

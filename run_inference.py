@@ -1,6 +1,3 @@
-import logging
-import os
-
 import torch
 from tqdm import tqdm
 
@@ -8,10 +5,9 @@ from tqdm import tqdm
 # DEVICE_NR = '0,1,2,3'
 # os.environ['CUDA_VISIBLE_DEVICES'] = DEVICE_NR
 from run_train import Train
-logging.basicConfig(level=logging.DEBUG)
 from dataset import (DukeDataset, OCTDataset, RESCDataset)
 from refine_pseudo_label import refine_input_by_cam
-from utils import CAMGeneratorAndSave, diff_map_for_att
+from utils import CAMGeneratorAndSave, diff_map_for_att, get_num_classes
 from metrics import scores, record_score
 
 class Inference(Train):
@@ -54,8 +50,9 @@ class Inference(Train):
                         updated_image = torch.cat((image, healthy_img, tensor_for_att), dim=1)
                     else:
                         updated_image = torch.cat((image, healthy_img), dim=1)
-            if self.args.iter_epochs > 0:
-                updated_image = refine_input_by_cam(self.device, multi_task_model, updated_image, mask)
+            '''no refinement in inference generates better result'''
+            # if self.args.iter_epochs > 0:
+            #     updated_image = refine_input_by_cam(self.device, multi_task_model, updated_image, mask)
             with torch.no_grad():
                 multi_task_model.assign_conditions(False)
                 cls_outputs, _ = multi_task_model(updated_image)
@@ -67,15 +64,16 @@ class Inference(Train):
             cam_list += pred_res
         print(len(cam_list))
 
-        score = scores(gt_list, cam_list, n_class=3)
+        score = scores(gt_list, cam_list, n_class=get_num_classes() + 1)
         print(score)
         record_score(score, 'resc')
         
 if __name__ == "__main__":
     is_inference=True
     validator = Inference(is_inference)
-    validator.inference(infer_list=['sn29218_78.bmp', 'sn22698_57.bmp'])
-    # validator.inference()
+    # validator.inference(infer_list=['subject_1_10.png'])
+    # validator.inference(infer_list=['sn29218_78.bmp', 'sn22698_57.bmp'])
+    validator.inference()
     # validator.inference(infer_list=['DME-15307-1.jpeg',
     #                               'DME-4240465-41.jpeg', 
     #                               'DR10.jpeg',

@@ -1,4 +1,3 @@
-import logging
 import os
 import time
 from collections import Counter
@@ -12,15 +11,14 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-DEVICE_NR = "0,1"
+DEVICE_NR = "2, 0"
 os.environ["CUDA_VISIBLE_DEVICES"] = DEVICE_NR
-logging.basicConfig(level=logging.DEBUG)
 
 from gan_inference import load_gan_model
 from dataset import (DukeDataset, OCTDataset, RESCDataset)
 from refine_pseudo_label import refine_input_by_cam, get_pseudo_label
-from our_models.retinal_models import MultiTaskModel, MultiTaskModel_v2, MultiTaskModel_att
-from our_models.single_models import CNNs, Transformers
+from network.retinal_models import MultiTaskModel_att
+from network.single_models import CNNs
 
 from utils import CAMGeneratorAndSave, OrgLabels, diff_map_for_att, get_num_classes, save_models, save_tensorboard_train, save_tensorboard_val
 from metrics import calculate_classification_metrics, calculate_roc
@@ -58,6 +56,7 @@ def dsc_loss(y_pred, y_true, varepsilon=1.e-8):
 class Train():
     def __init__(self, is_inference=False):
         self.args = Configs().parse(is_inference)
+        self.iou_txt_path = self.args.save_folder.split('/')[1]
         if not is_inference:
             self.tb = SummaryWriter('runs/{}'.format(self.args.save_folder[8:]))
         self.device = self.args.device 
@@ -67,7 +66,6 @@ class Train():
         self.sigmoid = nn.Sigmoid()
         self.backbone = network_class(self.args)
         self.num_class = len(OrgLabels)            
-        self.num_of_epochs = self.args.reg_epochs + self.args.iter_epochs
         self.gan_pretrained = False
         with torch.no_grad():
             if self.args.input_gan:
@@ -80,6 +78,8 @@ class Train():
         
         self.loss_cls_func = nn.BCEWithLogitsLoss() #no need sigmoid for this logits loss
         self.loss_seg_func = nn.CrossEntropyLoss() 
+        
+        self.include_refinement = False
         
     def get_cls_loss(self, y_pred, y_true):
         loss_ce = self.loss_cls_func(y_pred, y_true)
@@ -110,11 +110,8 @@ class Train():
                     else:
                         updated_image = torch.cat((image, healthy_img), dim=1)
 
-            if (epoch + 1) > self.args.reg_epochs:
-                updated_image = refine_input_by_cam(self.device, multi_task_model, updated_image, mask)
+            if self.include_refinement: updated_image = refine_input_by_cam(self.device, multi_task_model, updated_image, mask)
             with torch.no_grad():
-                include_segment = self.args.segmentation < epoch + 1
-                multi_task_model.assign_conditions(include_segment)
                 cls_outputs, seg_out = multi_task_model(updated_image)
                 sig_prediction = self.sigmoid(cls_outputs)
                 
@@ -141,13 +138,13 @@ class Train():
         
         score = scores(gt_img_list, cam_img_list, n_class=get_num_classes()+1)
         print(score)
-        record_score(score, 'resc')
+        record_score(score, self.iou_txt_path)
         
         # Print accuracy
         valid_acc_epoch, valid_loss_epoch, valid_seg_loss_epoch = {k: v  / (batch + 1) for k, v in total_acc_val.items()}, total_cls_loss_val / (batch + 1), total_seg_loss_val / (batch+1)
         roc_avg, roc_class = calculate_roc(pred_list, gt_list)
         print('- Val loss:', valid_loss_epoch, '- Seg loss: ', valid_seg_loss_epoch,'- Val ROC:', roc_avg,  "- ROC per class:", roc_class, "- Val acc:", valid_acc_epoch)
-        return valid_loss_epoch, valid_acc_epoch, roc_avg, roc_class
+        return valid_loss_epoch, valid_acc_epoch, roc_avg, roc_class, score['Mean IoU']
       
 
     def train_once(self, epoch, trainloader, multi_task_model, multi_optimizer, lr_scheduler):
@@ -175,19 +172,15 @@ class Train():
                     updated_image = torch.cat((image, healthy_img), dim=1)
             
             ############## CAM refinement step ################
-            if (epoch + 1) > self.args.reg_epochs:
-                updated_image = refine_input_by_cam(self.device, multi_task_model, updated_image, mask)
+            if self.include_refinement: updated_image = refine_input_by_cam(self.device, multi_task_model, updated_image, mask)
                 
             multi_optimizer.zero_grad()
-            include_segment = self.args.segmentation < epoch + 1
-            multi_task_model.assign_conditions(include_segment)
             cls_outputs, seg_out = multi_task_model(updated_image)
             sig_prediction = self.sigmoid(cls_outputs)
             ############## Segmentation Branch ################
             seg_loss = 0
-            if seg_out is not None:
-                outputs_for_seg = sig_prediction.clone()
-                params_seg = {'inputs': data, 'batch_preds': outputs_for_seg, 'refined': updated_image, 'device': self.device}
+            if multi_task_model.include_segment:
+                params_seg = {'mask': data['mask'], 'input_tensor': updated_image, 'cls_labels': labels,  'args': self.args}
                 pseudo_label = get_pseudo_label(params_seg, multi_task_model) # (batch, w, h) pixel value in (0, nb_class - 1)
                 seg_loss = self.loss_seg_func(seg_out, pseudo_label.to(self.device))
                 total_seg_loss += seg_loss.cpu().item()
@@ -223,14 +216,20 @@ class Train():
         return dataset_train, dataset_test
     
     def get_models(self):
-        multi_task_model = MultiTaskModel_att(self.backbone, 
+        if self.args.retinal_model == 'MultiTaskModel_att':
+            retinal_model_func = MultiTaskModel_att
+        elif self.args.retinal_model == 'CNNs':
+            retinal_model_func = CNNs
+        else:
+            raise NotImplementedError()
+        multi_task_model = retinal_model_func(self.backbone, 
                                           num_class=self.num_class,
                                           num_input_channel=self.num_input_channel, 
                                           backbone_name=self.args.backbone)
         print(multi_task_model)
         if self.args.continue_train:
             print(f"Continue training with regular {self.args.reg_epochs} epochs, {self.args.iter_epochs} refinement epochs")
-            reload_epoch = 'best' if self.args.ckp_epoch == 'best' else 40
+            reload_epoch = 40 if self.args.ckp_epoch == 'last' else self.args.ckp_epoch
             print('Loading pretrained model from checkpoint {0}/weights/{1}.pwf'.format(self.args.check_point, reload_epoch))
             checkpoint = torch.load('{0}/weights/{1}.pwf'.format(self.args.check_point, reload_epoch))   
             self.pretrained_epoch = checkpoint['epoch']
@@ -262,6 +261,7 @@ class Train():
         
         multi_task_model, multi_optimizer, lr_scheduler = self.get_models()
         best_roc = 0
+        best_mIoU = 0
         # TODO: the regular training epoch must consider the continue train as well...
         # Regular training process
         epoch = 0
@@ -271,29 +271,46 @@ class Train():
             save_tensorboard_train(self.tb, train_tensorboard_dict, epoch)
             ######## Validation step per 5 epochs ##########
             if (epoch + 1) % 5 == 0:
-                valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class = self.valid_once(epoch, testloader, multi_task_model)
+                valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class, mIoU = self.valid_once(epoch, testloader, multi_task_model)
                 if valid_roc_avg >= best_roc:
-                    save_models(self.args, epoch, multi_task_model, multi_optimizer, is_best=True)
+                    save_models(self.args, epoch, multi_task_model, multi_optimizer, best_type='cls')
                     best_roc = valid_roc_avg
+                if mIoU > best_mIoU:
+                    save_models(self.args, epoch, multi_task_model, multi_optimizer, best_type='pseudo')
+                    best_mIoU = mIoU
                 eval_tensorboard_dict = {'total_val_loss': valid_loss, 'total_val_acc_matrix': valid_acc_matrxi, 'total_val_roc': valid_roc_avg, 'total_val_roc_matrix': valid_roc_class}
                 save_tensorboard_val(self.tb, eval_tensorboard_dict, epoch)
             if epoch == self.args.reg_epochs - 1:
                 ## Save model for last regular train epoch
                 save_models(self.args, epoch, multi_task_model, multi_optimizer)
         
+        # Segmentation branch
         ref_begin_ep = self.pretrained_epoch if self.args.continue_train else epoch
+        for epoch in range(0, self.args.seg_epochs):
+            multi_task_model.assign_conditions(include_seg_key=True)
+            train_loss, train_acc_matrix, train_roc_avg, train_roc_class = self.train_once(epoch, trainloader, multi_task_model, multi_optimizer, lr_scheduler)
+            train_tensorboard_dict = {'total_train_loss': train_loss, 'total_train_acc_matrix': train_acc_matrix, 'total_train_roc': train_roc_avg, 'total_train_roc_matrix': train_roc_class,}
+            save_tensorboard_train(self.tb, train_tensorboard_dict, epoch)
+            ######## Validation step per 5 epochs ##########
+            if (epoch + 1) % 5 == 0:
+                valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class, mIoU = self.valid_once(epoch, testloader, multi_task_model)
+                eval_tensorboard_dict = {'total_val_loss': valid_loss, 'total_val_acc_matrix': valid_acc_matrxi, 'total_val_roc': valid_roc_avg, 'total_val_roc_matrix': valid_roc_class}
+                save_tensorboard_val(self.tb, eval_tensorboard_dict, epoch)
+        
+        
         # Refinement CAM training process
         for r_epoch in range(0, self.args.iter_epochs):
+            self.include_refinement = True
             curr_epoch = ref_begin_ep + r_epoch
             train_loss, train_acc_matrix, train_roc_avg, train_roc_class = self.train_once(curr_epoch, trainloader, multi_task_model, multi_optimizer, lr_scheduler)
             train_tensorboard_dict = {'total_train_loss': train_loss, 'total_train_acc_matrix': train_acc_matrix, 'total_train_roc': train_roc_avg, 'total_train_roc_matrix': train_roc_class,}
             save_tensorboard_train(self.tb, train_tensorboard_dict, curr_epoch)
             ######## Validate for each epoch in refinement steps ##########
-            valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class = self.valid_once(curr_epoch, testloader, multi_task_model)
+            valid_loss, valid_acc_matrxi, valid_roc_avg, valid_roc_class, _ = self.valid_once(curr_epoch, testloader, multi_task_model)
             eval_tensorboard_dict = {'total_val_loss': valid_loss, 'total_val_acc_matrix': valid_acc_matrxi, 'total_val_roc': valid_roc_avg, 'total_val_roc_matrix': valid_roc_class}
             save_tensorboard_val(self.tb, eval_tensorboard_dict, curr_epoch)
-            save_models(self.args, curr_epoch, multi_task_model, multi_optimizer, is_best=False)
-            
+            save_models(self.args, curr_epoch, multi_task_model, multi_optimizer, is_iter=True)
+        
         print('final running time:', time.time() - start)
         
   

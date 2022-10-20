@@ -38,9 +38,16 @@ OrgLabels = Configs().get_labels()  # ['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackG
 
 CAT_LIST = ['background'] + [x for x in OrgLabels if x != 'BackGround'] + ['meanIOU']
 
-"""  0.6 has the highest mIoU from SEAM results"""
-out_cam_pred_alpha = 0.7
-
+def get_mask_path_by_image_path(image_path):
+    if 'BOE' in image_path:
+        mask_path = image_path.replace('/images/', '/mask/')
+    elif 'RESC' in image_path:
+        mask_path = image_path.replace('/RESC/', '/RESC/mask/').replace('original_images/', '')
+    elif 'NORMAL' in image_path:
+        mask_path = image_path.replace('train/0.normal', 'normal_mask')
+    else:
+        mask_path = image_path.replace('original', 'mask')
+    return mask_path
 
 class SegmentationModelOutputWrapper(torch.nn.Module):
     def __init__(self, model):
@@ -130,6 +137,28 @@ def convert_resc_labels(img):
     img[img == 128] = 2
     return img
 
+def convert_duke_labels(img):
+    img[img < 255] = 0
+    img[img == 255] = 1
+    return img
+
+def convert_our_dataset_labels(img):
+    # "categories":[{"id":51,"name":"IRF"},{"id":102,"name":"SRF"},{"id":153,"name":"HRD"},{"id":204,"name":"EZ disruption"},{"id":255,"name":"RPE "}]}
+    # ['SRF', 'IRF', 'EZ disrupted', 'HRD', 'BackGround']
+    img[img==51] = 2
+    img[img==102] = 1
+    img[img==153] = 4
+    img[img==204] = 3
+    img[img==255] = 0 # we dont include RPE for now
+    
+    return img
+
+def convert_data_labels(img, root_dirs):
+    if 'RESC' in root_dirs:
+        return convert_resc_labels(img)
+    if 'BOE' in root_dirs:
+        return convert_duke_labels(img)
+    return convert_our_dataset_labels(img)
 
 def post_process_cam(resized_cam, orig_mask=None):
     masked_cam = resized_cam 
@@ -178,7 +207,7 @@ class CAMGeneratorAndSave:
         ]
         # print(self.model)
         with GradCAM(model=self.model, use_cuda="cuda", target_layers=target_layers, reshape_transform=reshape_transform) as cam:
-            grayscale_cam = cam(input_tensor=extend_input_tensor, targets=targets, eigen_smooth=False, aug_smooth=False)
+            grayscale_cam = cam(input_tensor=extend_input_tensor, targets=targets, eigen_smooth=False, aug_smooth=self.opts.aug_smooth)
             # [cls, w, h]
         resized_cam = F.interpolate(
             torch.from_numpy(grayscale_cam).unsqueeze(0), # [1, cls, w, h]
@@ -188,9 +217,9 @@ class CAMGeneratorAndSave:
         )[0].numpy() # [cls, w, h] numpy
 
         norm_resized_cam = post_process_cam(resized_cam, orig_mask)
-        bg_score = [np.ones_like(norm_resized_cam[0]) * out_cam_pred_alpha]
+        bg_score = [np.ones_like(norm_resized_cam[0]) * self.opts.out_cam_pred_alpha]
         pred_with_bg_score = np.concatenate((bg_score, norm_resized_cam))
-    
+
         """Generate all cams except the ones that are not in ground true classes"""
         # Need include the 0 == background, add 1 extra.
         for i in range(get_num_classes() + 1):
@@ -225,10 +254,23 @@ class CAMGeneratorAndSave:
     def save_cam_process(self, batch_nb):
         img_name = self.inputs["path"][batch_nb].split("/")[-1]
         # 0-255 pixel value, numpy
-        orig_img = np.asarray(Image.open(self.inputs["path"][batch_nb]))
-        mask_path = os.path.join(self.opts.mask_dir, "valid", img_name)
-        orig_mask = np.asarray(Image.open(mask_path))[..., 0]
-        annot_path = os.path.join(self.opts.root_dirs, "valid/label_images", img_name)
+        image_path = self.inputs["path"][batch_nb]
+        orig_img = np.asarray(Image.open(image_path))
+        if len(orig_img.shape) == 3:
+            orig_img = orig_img[...,0]
+        orig_mask = np.asarray(Image.open(get_mask_path_by_image_path(image_path)))[..., 0]
+        
+        orig_mask[orig_mask>150]=255
+        orig_mask[orig_mask<=150]=0
+        
+        if 'our_dataset' in self.opts.root_dirs:
+            if self.opts.expert_annot == 'both':
+                annot_path = os.path.join(self.opts.root_dirs, self.opts.annot_dir, img_name.split('.')[0] + '.png')
+            else:
+                expert_annot_img_name = img_name.split('.')[0] + f'_{self.opts.expert_annot}.png'
+                annot_path = os.path.join(self.opts.root_dirs, self.opts.annot_dir, expert_annot_img_name)
+        else:
+            annot_path = os.path.join(self.opts.root_dirs, self.opts.annot_dir, img_name) # resc valid/label_images
         orig_annot = np.asarray(Image.open(annot_path))
 
         true_classes = [
@@ -262,8 +304,7 @@ class CAMGeneratorAndSave:
                     normalize=True,
                     scale_each=True,
                 )
-
-        norm_annot = convert_resc_labels(orig_annot)
+        norm_annot = convert_data_labels(orig_annot, self.opts.root_dirs)
         save_cam_in_row, pred_labels = self.get_cam_results_per_class(
             orig_img, orig_mask, norm_annot
         )
@@ -318,11 +359,20 @@ class CAMGeneratorAndSave:
         return gt, ready_pred_4d
 
 
-def save_models(args, epoch, multi_task_model, multi_optimizer, is_best=False):
+def save_models(args, epoch, multi_task_model, multi_optimizer, best_type=None, is_iter=False):
     save_path = f"./{args.save_folder}/weights"
-    save_name = "best" if is_best else epoch + 1
+    if best_type is None:
+        save_name = epoch + 1
+    elif best_type == 'pseudo':
+        save_name = 'best_iou'
+    elif best_type == 'cls':
+        save_name = "best"
+    else:
+        raise ValueError('The type for save model is not available')
     if not os.path.exists(save_path):
         os.makedirs(save_path)
+    if is_iter:
+        save_name = f'iter_{save_name}'
     torch.save(
         {
             "epoch": epoch,
@@ -390,7 +440,6 @@ if __name__ == "__main__":
         3. Combining both
     """
 
-    args = get_args()
     methods = {
         "gradcam": GradCAM,
         "scorecam": ScoreCAM,
@@ -398,71 +447,7 @@ if __name__ == "__main__":
         "ablationcam": AblationCAM,
         "xgradcam": XGradCAM,
         "eigencam": EigenCAM,
-        "eigengradcam": EigenGradCAM,
-        "layercam": LayerCAM,
         "fullgrad": FullGrad,
     }
 
     model = models.resnet50(pretrained=True)
-
-    # Choose the target layer you want to compute the visualization for.
-    # Usually this will be the last convolutional layer in the model.
-    # Some common choices can be:
-    # Resnet18 and 50: model.layer4
-    # VGG, densenet161: model.features[-1]
-    # mnasnet1_0: model.layers[-1]
-    # You can print the model to help chose the layer
-    # You can pass a list with several target layers,
-    # in that case the CAMs will be computed per layer and then aggregated.
-    # You can also try selecting all layers of a certain type, with e.g:
-    # from pytorch_grad_cam.utils.find_layers import find_layer_types_recursive
-    # find_layer_types_recursive(model, [torch.nn.ReLU])
-    target_layers = [model.layer4]
-
-    # rgb_img = cv2.imread(args.image_path, 1)[:, :, ::-1]
-    # rgb_img = np.float32(rgb_img) / 255
-    # input_tensor = preprocess_image(rgb_img,
-    #                                 mean=[0.485, 0.456, 0.406],
-    #                                 std=[0.229, 0.224, 0.225])
-
-    # We have to specify the target we want to generate
-    # the Class Activation Maps for.
-    # If targets is None, the highest scoring category (for every member in the batch) will be used.
-    # You can target specific categories by
-    # targets = [e.g ClassifierOutputTarget(281)]
-    targets = None
-
-    # Using the with statement ensures the context is freed, and you can
-    # recreate different CAM objects in a loop.
-
-    # cam_algorithm = methods[args.method]
-    # with cam_algorithm(model=model,
-    #                    target_layers=target_layers,
-    #                    use_cuda=args.use_cuda) as cam:
-
-    #     # AblationCAM and ScoreCAM have batched implementations.
-    #     # You can override the internal batch size for faster computation.
-    #     cam.batch_size = 32
-    #     grayscale_cam = cam(input_tensor=input_tensor,
-    #                         targets=targets,
-    #                         aug_smooth=args.aug_smooth,
-    #                         eigen_smooth=args.eigen_smooth)
-
-    #     # Here grayscale_cam has only one image in the batch
-    #     grayscale_cam = grayscale_cam[0, :]
-
-    #     cam_image = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
-
-    #     # cam_image is RGB encoded whereas "cv2.imwrite" requires BGR encoding.
-    #     cam_image = cv2.cvtColor(cam_image, cv2.COLOR_RGB2BGR)
-
-    # gb_model = GuidedBackpropReLUModel(model=model, use_cuda=args.use_cuda)
-    # gb = gb_model(input_tensor, target_category=None)
-
-    # cam_mask = cv2.merge([grayscale_cam, grayscale_cam, grayscale_cam])
-    # cam_gb = deprocess_image(cam_mask * gb)
-    # gb = deprocess_image(gb)
-
-    # cv2.imwrite(f'{args.method}_cam.jpg', cam_image)
-    # cv2.imwrite(f'{args.method}_gb.jpg', gb)
-    # cv2.imwrite(f'{args.method}_cam_gb.jpg', cam_gb)

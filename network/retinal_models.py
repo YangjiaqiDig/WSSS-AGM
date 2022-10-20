@@ -2,8 +2,8 @@ import torch.nn as nn
 import torchvision.models as models
 import torch
 import copy
-from our_models.attention_models import AttentionBlock, EncoderBlock, DoubleConv, Down, VitBlock, SwimTBlock
-from our_models.seg import SegmentationBlock
+from network.attention_models import AttentionBlock, EncoderBlock, DoubleConv, Down, VitBlock, SwimTBlock
+from network.seg import SegmentationBlock
 
 num_channels_fc = {"resnet18": 512, "resnet50": 2048}
 
@@ -145,7 +145,7 @@ class MultiTaskModel_att(nn.Module):
         segmentation_pred = None
         # segmentation output
         if self.include_segment:
-            segmentation_pred = self.SegNet(base_out)
+            segmentation_pred = self.SegNet(combined_out) # base_out
 
         return cls_preds, segmentation_pred
 

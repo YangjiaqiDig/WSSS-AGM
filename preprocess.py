@@ -6,32 +6,89 @@ import matplotlib.pyplot as plt
 import cv2 as cv
 
 import pandas as pd
+import shutil
 
-def filter_noise():
-    for filename in os.listdir('/ssd1/jiaqi/retinal_project/examples/ganomaly/anomaly_dme_rescale'):
-        print(filename)
-        img_path = os.path.join('/ssd1/jiaqi/retinal_project/examples/ganomaly/anomaly_dme_rescale', '{}'.format(filename))
+from metrics import scores
+
+IMAGES_DIR = "train/"
+IMAGES_LABELED_DIR = "train_label"
+LABELS_DIR = "train_label.csv"
+pd.set_option('display.max_rows', None)
+
+def normalize_label(value):
+    if value == 'y':
+        return 1
+    return 0
+
+def get_dic_img_label(img, df, filename, dic):
+    dic["image"] = img
+    row = df.loc[df['Image'] == filename]
+    dic["edema"] = normalize_label(row["Edema"].values[0])
+    dic["dril"] = normalize_label(row["DRIL"].values[0])
+    dic["ez"] = normalize_label(row["EZ loss"].values[0])
+    dic["rpe"] = normalize_label(row["RPE changes"].values[0])
+
+    return dic
+
+def get_dic_img_detail_lable(img, df, filename, dic):
+    # img,SRF,IRF,EZ attenuated,EZ disrupted,HRD,RPE,Retinal Traction,Definite DRIL,Questionable DRIL
+    dic["image"] = img
+    row = df.loc[df['img'] == filename]
+    dic["srf"] = row["SRF"].values[0]
+    dic["irf"] = row["IRF"].values[0]
+    dic["ezAtt"] = row["EZ attenuated"].values[0]
+    dic["ezDis"] = row["EZ disrupted"].values[0]
+    dic["hrd"] = row["HRD"].values[0]
+    dic["rpe"] = row["RPE"].values[0]
+    dic["rt"] = row["Retinal Traction"].values[0]
+    dic["dril"] = row["Definite DRIL"].values[0]
+    dic["qDril"] = row["Questionable DRIL"].values[0]
+    return dic
+
+def prepare_dme_dataset():
+    df = pd.read_csv(LABELS_DIR)
+    df = df[df['DRIL'].notna()]
+    print("total number of labeled", len(df))
+    labeled_file_name = df["Image"]
+    for idx, filename in enumerate(labeled_file_name):
+        dic = {}
+        img_path = os.path.join(IMAGES_DIR, '{}.jpeg'.format(filename))
         image = Image.open(img_path)
-        
-        # orig_path = os.path.join('datasets/our_dataset/test/1.abnormal', '{}'.format(filename))
-        # orig = Image.open(orig_path)
-        # r, g, b = image.split()
-        # b[b<255] =0
+        image_arr = np.asarray(image)
+        print(filename, image_arr.shape)
+        dic = get_dic_img_label(image_arr, df, filename, dic)
+        np.save("{0}/{1}.npy".format(IMAGES_LABELED_DIR, idx), dic)
+        shutil.copy(img_path, "{0}/{1}_{2}.jpeg".format(IMAGES_LABELED_DIR, idx, filename))
 
-        im2 = image.filter(ImageFilter.MinFilter(3))
-        # im = orig.filter(ImageFilter.MinFilter(3))
-        
-        # im3 = image.filter(ImageFilter.ModeFilter(3))  
-        im2.save('{}'.format(filename))
-        # im.save('org.jpeg')
-        
-        import pdb; pdb.set_trace()
-        # image_arr = np.asarray(im3)
-        # result = anisotropic_diffusion(image_arr)
-        # print(result.shape)
-        # imgplotr = plt.imshow(image_arr)
-        # plt.savefig('tst3.jpeg')
-        # plt.show()
+def prepare_dr_dataset():
+    df = pd.read_csv('dr_labels.csv')
+    print("total number of labeled", len(df))
+    labeled_file_name = df["img"]
+    for idx, filename in enumerate(labeled_file_name):
+        dic = {}
+        img_path = os.path.join('dr_dataset', '{}'.format(filename))
+        image = Image.open(img_path)
+        image_arr = np.asarray(image)
+        print(filename, image_arr.shape)
+        dic = get_dic_img_detail_lable(image_arr, df, filename, dic)
+        np.save("{0}/{1}.npy".format('train_dr', idx), dic)
+        shutil.copy(img_path, "{0}/{1}_{2}".format('train_dr', idx, filename))
+
+def prepare_resc_dataset():
+    root_dir = "RESC/train/label_images"
+    # rename all the sub-folders to unique shorter name, skip the code here
+    
+    # flatten the images
+    subfolders = glob.glob("{}/*".format(root_dir))
+    for sub_folder in subfolders:
+        print(sub_folder)
+        patient_id = sub_folder.split('/')[-1]
+        images = os.listdir(sub_folder)
+        for image in images:
+            old_path = "{}/{}".format(sub_folder, image)
+            new_path = "{}/{}_{}".format(root_dir, patient_id, image)
+            shutil.move(old_path, new_path)
+
 
 def edge_detection():
     img = cv.imread('cam_test/9_DR10.jpeg',0)
@@ -243,20 +300,20 @@ def generate_from_coco(image_id, coco, gt_labels, cat_ids, expert):
         # mask += coco.annToMask(ann)
     save_mask = Image.fromarray((anns_img / 5 * 255).astype(np.uint8))
     i_name = file_name.split('.')[0]
-    save_mask.save('annotation_test/{}_{}.png'.format(i_name, expert))
+    save_mask.save('our_data_analysis/annotation_v2/{}_{}.png'.format(i_name, expert))
     return found_gt
 
 def genearte_annotation_for_our_dataset(gt_labels):
     from pycocotools.coco import COCO
     import numpy as np
     # "categories":[{"id":1,"name":"IRF"},{"id":2,"name":"SRF"},{"id":3,"name":"HRD"},{"id":4,"name":"EZ disruption"},{"id":5,"name":"RPE "}]}
-    coco = COCO('datasets/our_dataset/annotations.json')
-    coco_2 = COCO('datasets/our_dataset/annotation_2.json')
-    cat_ids = coco.getCatIds() # 1,2,3,4,5
+    coco_1 = COCO('our_data_analysis/mina_v2.json')
+    coco_2 = COCO('our_data_analysis/meera_v2.json')
+    cat_ids = coco_1.getCatIds() # 1,2,3,4,5
     res_list = []
     for image_id in range(1, 101):
         # new_labeled = {'SRF_new': 0, 'IRF_new': 0, 'EZ disrupted_new': 0, 'HRD_new': 0}
-        updated_res = generate_from_coco(image_id, coco, gt_labels, cat_ids, 'mina')
+        updated_res = generate_from_coco(image_id, coco_1, gt_labels, cat_ids, 'mina')
         res_list.append(updated_res)
     new_df = pd.DataFrame(res_list)
     
@@ -267,30 +324,114 @@ def genearte_annotation_for_our_dataset(gt_labels):
         res_list.append(updated_res)
     new_df = pd.DataFrame(res_list)
     new_df = new_df.fillna(0)
-    new_df.to_csv('annot_analysis.csv')
-    # all_same = [x['same'] for x in res_list if x['same']]
-    # all_same_2 = [x['same_2'] for x in res_list if x['same_2']]
-    # all_expert_same = [x['expert_same'] for x in res_list if x['expert_same']]
-    # print(res_list[:10])
-    # print(sum(all_same), sum(all_same_2), sum(all_expert_same))
+    new_df.to_csv('our_data_analysis/annot_analysis_v2.csv')
 
 def analyze_annotations():
     from sklearn import metrics
     import matplotlib.pyplot as plt
-    df = pd.read_csv('annot_analysis.csv', index_col=0)
+    df = pd.read_csv('our_data_analysis/annot_analysis_v2.csv', index_col=0)
     confusion_matrix = metrics.confusion_matrix(df['IRF'], df['mina_IRF'])
     cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix, display_labels = [False, True])
+    # print(cm_display)
+    import pdb; pdb.set_trace()
+    print(df[(df['mina_SRF']==df['meera_SRF']) & (df['mina_IRF']==df['meera_IRF']) & (df['mina_EZ disrupted']==df['meera_EZ disrupted']) & (df['mina_HRD']==df['meera_HRD']) & (df['mina_RPE']==df['meera_RPE'])].shape)
+    # return cm_display
+
+def save_human_label():
+    labels_table = pd.read_csv('our_data_analysis/annot_analysis_v2.csv')
+    mina_label = labels_table.loc[:, (labels_table.columns.str.contains(r'mina|img')) & ~(labels_table.columns.str.contains('_area_'))]
+    mina_label.columns = mina_label.columns.str.replace('mina_', '')
+    meera_label = labels_table.loc[:, (labels_table.columns.str.contains(r'meera|img')) & ~(labels_table.columns.str.contains('_area_'))]
+    meera_label.columns = meera_label.columns.str.replace('meera_', '')
     
-    print(df[df['IRF']==df['mina_IRF']])
+    mina_label.to_csv('datasets/our_dataset/mina_labels.csv')
+    meera_label.to_csv('datasets/our_dataset/meera_labels.csv')
     return
+
+
+def get_intersection_area(ex1, ex2, id_num):
+    ex1_copy, ex2_copy = ex1.copy(), ex2.copy()
+    ex1_copy[ex1_copy != id_num] = 0
+    ex1_copy[ex1_copy == id_num] = 1
+    ex2_copy[ex2_copy != id_num] = 0
+    ex2_copy[ex2_copy == id_num] = 1
+    score = scores([ex1_copy], [ex2_copy], n_class=2)
+    # import pdb; pdb.set_trace()
+    return score['Class IoU'][1]
+
+def union_exps_annotations(ex1, ex2, updated_img, id_num):
+    updated_img[(ex1==id_num) | (ex2==id_num)] = id_num
+    return updated_img
+
+def combine_human_annots():
+    list_of_annotations = glob.glob('datasets/our_dataset/annotation_v2/*')
+    mina_labels = pd.read_csv('datasets/our_dataset/mina_labels.csv', index_col=0)
+    meera_labels = pd.read_csv('datasets/our_dataset/meera_labels.csv', index_col=0)
+    mina_list = sorted([x for x in list_of_annotations if 'mina' in x])
+    meera_list = sorted([x for x in list_of_annotations if 'meera' in x])
+    inter_img_label = {'IRF': 0, 'SRF': 0, 'EZ': 0, 'HRD': 0}
+    inter_areas = {'IRF': 0, 'SRF': 0, 'EZ': 0, 'HRD': 0}
+    updated_img_labels = []
+    # "categories":[{"id":51,"name":"IRF"},{"id":102,"name":"SRF"},{"id":153,"name":"HRD"},{"id":204,"name":"EZ disruption"},{"id":255,"name":"RPE"}]}
+    # ['SRF', 'IRF', 'EZ disrupted', 'HRD', 'BackGround']
+    for mina, meera in zip(mina_list, meera_list):
+        curr_img_label = {'IRF': 0, 'SRF': 0, 'EZ disrupted': 0, 'HRD': 0}
+        assert mina.split('_')[0] == meera.split('_')[0]
+        mina_img = np.array(Image.open(mina))
+        meera_img = np.array(Image.open(meera))
+        assert mina_img.shape == meera_img.shape
+        img_name = mina.split('/')[-1].split('_')[0] + '.jpeg'
+        curr_img_label['img'] = img_name
+        mina_img_l = mina_labels[mina_labels['img']==img_name].iloc[0]
+        meera_img_l = meera_labels[meera_labels['img']==img_name].iloc[0]
+        unioned_image = np.zeros_like(mina_img)
+        if mina_img_l['EZ disrupted'] and meera_img_l['EZ disrupted']:
+            assert 204 in mina_img and 204 in meera_img
+            curr_img_label['EZ disrupted'] = 1
+            inter_areas['EZ'] += get_intersection_area(mina_img, meera_img, 204)
+            inter_img_label['EZ'] += 1
+            unioned_image = union_exps_annotations(mina_img, meera_img, unioned_image, 204)
+        if mina_img_l['HRD'] and meera_img_l['HRD']:
+            assert 153 in mina_img and 153 in meera_img
+            curr_img_label['HRD'] = 1
+            inter_areas['HRD'] +=  get_intersection_area(mina_img, meera_img, 153)
+            inter_img_label['HRD'] += 1
+            unioned_image = union_exps_annotations(mina_img, meera_img, unioned_image, 153)
+        if mina_img_l['SRF'] and meera_img_l['SRF']:
+            assert 102 in mina_img and 102 in meera_img
+            curr_img_label['SRF'] = 1
+            inter_areas['SRF'] += get_intersection_area(mina_img, meera_img, 102)
+            inter_img_label['SRF'] += 1
+            unioned_image = union_exps_annotations(mina_img, meera_img, unioned_image, 102)
+        if mina_img_l['IRF'] and meera_img_l['IRF']:
+            assert 51 in mina_img and 51 in meera_img
+            curr_img_label['IRF'] = 1
+            inter_areas['IRF'] += get_intersection_area(mina_img, meera_img, 51)
+            inter_img_label['IRF'] += 1
+            unioned_image = union_exps_annotations(mina_img, meera_img, unioned_image, 51)
+        updated_img_labels.append(curr_img_label)
+        # if 255 in mina_img or 255 in meera_img:
+            # import pdb; pdb.set_trace()
+        assert len(np.unique(unioned_image)) == len([k for k, v in curr_img_label.items() if v == 1]) + 1
+        save_mask = Image.fromarray((unioned_image).astype(np.uint8))
+        save_mask.save('datasets/our_dataset/annot_combine/' + img_name.replace('.jpeg', '.png'))
+    inter_areas['EZ'] /= inter_img_label['EZ']
+    inter_areas['HRD'] /= inter_img_label['HRD']
+    inter_areas['SRF'] /= inter_img_label['SRF']
+    inter_areas['IRF'] /= inter_img_label['IRF']
+    print(inter_img_label)
+    pd.DataFrame(updated_img_labels).to_csv('datasets/our_dataset/combine_labels.csv')
+    return inter_areas
+
+
 
 if __name__ == "__main__":
     # overlap()
     # filter_noise()
     # remove_background()
     # random_seperate_test()
-    dirs = ["datasets/oct_kaggle/train/0.normal/*"]
-    generate_mask_general(dirs, "datasets/oct_kaggle/normal_mask")
+    # dirs = ["datasets/oct_kaggle/train/0.normal/*"]
+    # generate_mask_general(dirs, "datasets/oct_kaggle/normal_mask")
     # import os
     # images = os.listdir('datasets/our_dataset/original/test/')
     # lesion_images = [x for x in images if 'NORMAL' not in x]
@@ -301,3 +442,6 @@ if __name__ == "__main__":
     # genearte_annotation_for_our_dataset(first_labels)
     
     # analyze_annotations()
+    # save_human_label()
+    inter_areas = combine_human_annots()
+    print(inter_areas)
