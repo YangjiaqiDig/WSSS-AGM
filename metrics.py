@@ -2,20 +2,20 @@
 import numpy as np
 import os
 from sklearn.metrics import accuracy_score, f1_score, classification_report, roc_auc_score
-from utils import CAT_LIST, OrgLabels, get_num_classes
+from utils import CAT_LIST, OrgLabels, convert_duke_labels, convert_resc_labels, get_num_classes
 from PIL import Image
 import os
 import argparse
 import glob
 
-# 0.8247863247863247 0.7519246396739377 0.8247863247863247
-# 0.8301282051282052 0.7603308530659053 0.8301282051282052
+'''Classification: accuracy + f1'''
 def calculate_classification_metrics(outputs, labels):
     predicted = np.round(outputs.cpu().detach().numpy())
     gt = labels.cpu().detach().numpy()
 
     acc, f1m, f1mi, class_acc = 0, 0, 0, [0]*len(OrgLabels) 
     for i, pred in enumerate(predicted):
+        # fix the accuracy
         acc +=  accuracy_score(gt[i],pred)
         f1m += f1_score(gt[i],pred,average = 'macro', zero_division=1)
         f1mi += f1_score(gt[i],pred,average = 'micro', zero_division=1)
@@ -27,6 +27,7 @@ def calculate_classification_metrics(outputs, labels):
         
     return res_dic
 
+'''Classification: input probabily'''
 def calculate_roc(outputs, labels):
     # [batch, class]
     predicted = np.array(outputs)
@@ -38,6 +39,11 @@ def calculate_roc(outputs, labels):
         predicted = predicted[:, :-1]
     roc_class = roc_auc_score(gt, predicted, average=None)
     roc_avg = roc_auc_score(gt, predicted, average='weighted')
+    if get_num_classes() == 1:
+        if 'BackGround' in OrgLabels:
+            res_dict = {OrgLabels[0]: roc_class, OrgLabels[1]: 1}
+        else: res_dict = {OrgLabels[0]}
+        return roc_avg, res_dict
     res_dict = {}
     for i in range(len(OrgLabels)):
         if i == len(OrgLabels) - 1:
@@ -46,6 +52,10 @@ def calculate_roc(outputs, labels):
             res_dict[OrgLabels[i]] = roc_class[i]
     return roc_avg, res_dict
 
+'''sem seg Dice: input probbaly map'''
+
+
+'''sem seg f1'''
 def calculate_F1(pred_path, gt_path, numofclass):
     TPs = [0] * numofclass
     FPs = [0] * numofclass
@@ -99,7 +109,7 @@ def record_score(score, save_path):
     for i in range(get_num_classes()+1):
         score_list.append(score['Class IoU'][i])
         aveJ = score['Mean IoU']
-    with open('{}_iou.txt'.format(save_path), 'w') as f:
+    with open('iou_collections/{}_iou.txt'.format(save_path), 'w') as f:
         for num, cls_iou in enumerate(score_list):
             print('class {:2d} {:12} IU {:.2f}'.format(num, CAT_LIST[num], round(cls_iou, 3)))
             f.write('class {:2d} {:12} IU {:.2f}'.format(num, CAT_LIST[num], round(cls_iou, 3)) + '\n')
@@ -107,14 +117,13 @@ def record_score(score, save_path):
         f.write('meanIOU: ' + str(aveJ) + '\n')    
         f.write('pixelAcc: ' + str(score['Pixel Accuracy']) + '\n' + 'meanAcc: ' + str(score['Mean Accuracy']) + '\n') 
 
-
-categories = ['background', 'SRF', 'PED']
+'''mIoU'''
+categories = ['background', 'Fluid'] #['background', 'SRF', 'PED']
 def do_python_eval(predict_folder, gt_folder, name_list, input_type='png', threshold=1.0):
     pred_list = []
     gt_list = []
 
-    for idx in range(0,len(name_list)):
-        name = name_list[idx]
+    for name in name_list:
         if input_type == 'png':
             predict_file = os.path.join(predict_folder,'%s.png'%name)
             predict = np.array(Image.open(predict_file)) #cv2.imread(predict_file)
@@ -131,14 +140,17 @@ def do_python_eval(predict_folder, gt_folder, name_list, input_type='png', thres
             # print(predict.shape, np.unique(predict))
         pred_list.append(predict)
         
-        gt_file = os.path.join(gt_folder,'%s.bmp'%name)
+        '''Duke only'''
+        duke_gt_name = name.split('+')[-1] + '.png'
+        resc_gt_name = '%s.bmp'%name
+        gt_file = os.path.join(gt_folder,duke_gt_name)
         gt = np.array(Image.open(gt_file))
         # gt = cv2.resize(gt, dsize=(512, 512))
         # import pdb; pdb.set_trace()
         '''for RESC'''
-        gt[gt == 191] = 1
-        gt[gt == 128] = 2
-        gt[gt == 255] = 0
+        # gt = convert_resc_labels(gt)
+        gt = convert_duke_labels(gt)
+
         # print(gt.shape, np.unique(gt))
         gt_list.append(gt)
     return pred_list, gt_list
@@ -147,19 +159,26 @@ def do_python_eval(predict_folder, gt_folder, name_list, input_type='png', thres
 if __name__ == '__main__':
     # python metrics.py  --type npy --curve True
     parser = argparse.ArgumentParser()
-    parser.add_argument("--list", default='baseline_models/SEAM/resc/resc_cam/*', type=str)
-    parser.add_argument("--predict_dir", default='baseline_models/SEAM/resc/resc_cam', type=str)
-    parser.add_argument("--gt_dir", default='datasets/RESC/valid/label_images', type=str)
+    parser.add_argument("--list", default='baseline_models/SEAM/duke/duke_cam/*', type=str)
+    # parser.add_argument("--list", default='baseline_models/WSMIS/irn/result/cam/*', type=str)
+    parser.add_argument("--predict_dir", default='baseline_models/SEAM/duke/duke_cam', type=str)
+    # parser.add_argument("--predict_dir", default='baseline_models/WSMIS/irn/result/cam', type=str)
+    parser.add_argument("--gt_dir", default='datasets/2015_BOE_Chiu/segment_annotation/labels', type=str)
+    # parser.add_argument("--gt_dir", default='datasets/RESC/valid/label_images', type=str)
+    
+    # parser.add_argument('--type', default='npy', choices=['npy', 'png'], type=str)
     parser.add_argument('--type', default='npy', choices=['npy', 'png'], type=str)
+    
     parser.add_argument('--t', default=0.6, type=float) # 0.3 is the highest mIoU by curve
-    parser.add_argument('--curve', default=False, type=bool)
-    parser.add_argument('--log_dir', default='resc', type=str)
+    parser.add_argument('--curve', default=True, type=bool)
+    parser.add_argument('--log_dir', default='seam_duke', type=str)
     args = parser.parse_args()
 
     if args.type == 'npy':
         assert args.t is not None or args.curve
     # df = pd.read_csv(args.list, names=['filename'])
     name_list = [pth.split('/')[-1].split('.')[0] for pth in glob.glob(args.list)] #df['filename'].values
+    import pdb; pdb.set_trace()
     print('Disease size: ', len(name_list))
     if not args.curve:
         pred_list, gt_list = do_python_eval(args.predict_dir, args.gt_dir, name_list, args.type, args.t)
@@ -168,10 +187,10 @@ if __name__ == '__main__':
         record_score(score, args.log_dir)
     else:
         l = []
-        for i in range(60):
+        for i in range(60, 100):
             t = i/100.0
             pred_list, gt_list = do_python_eval(args.predict_dir, args.gt_dir, name_list, args.type, t)
-            score = scores(gt_list, pred_list, n_class=3)
+            score = scores(gt_list, pred_list, n_class=len(categories))
             print(score)
             record_score(score, args.log_dir)
             l.append(score['Mean IoU'])
