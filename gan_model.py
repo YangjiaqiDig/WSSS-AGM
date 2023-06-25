@@ -41,6 +41,7 @@ class BaseModel():
         
     def inference(self, image_tensor):
         with torch.no_grad():
+            # self.netg.eval()
             # print(image_tensor.is_cuda)
             self.input.resize_(image_tensor.size()).copy_(image_tensor)
             self.fake, latent_i, latent_o = self.netg(self.input)

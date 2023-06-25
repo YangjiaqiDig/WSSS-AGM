@@ -31,3 +31,13 @@ our_data_analysis/
 
 baseline_models
 iou_collections
+abl_backbone_maps/
+
+# images ignore
+*.png
+*.jpg
+*.jpeg
+*.bmp
+
+# npy ignore
+*.npy

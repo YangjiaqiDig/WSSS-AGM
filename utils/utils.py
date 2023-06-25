@@ -18,6 +18,7 @@ from pytorch_grad_cam.utils.image import (
     deprocess_image,
     preprocess_image,
 )
+import time
 import torchvision.models as models
 import torchvision.utils as vutils
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
@@ -26,9 +27,9 @@ from PIL import Image
 
 type_color = {
     0: [0, 0, 0],  # black
-    1: [255, 0, 0],  # srf red
-    2: [0, 255, 0],  # irf green
-    3: [0, 0, 255],  # ez blue
+    1: [52, 195, 235],  # srf red
+    3: [0, 255, 0],  # irf green
+    2: [165, 235, 52],  # ez blue   235, 211, 52
     4: [255, 255, 0],  # hrd yellow
     5: [255, 165, 0],  # rpe orange
     6: [255, 0, 255],  # back ground pink
@@ -36,26 +37,47 @@ type_color = {
 OrgLabels = Configs().get_labels()  # ['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround']
 
 
-CAT_LIST = ['background'] + [x for x in OrgLabels if x != 'BackGround'] + ['meanIOU']
+CAT_LIST = ["background"] + [x for x in OrgLabels if x != "BackGround"] + ["meanIOU"]
+
 
 def get_mask_path_by_image_path(image_path):
-    if 'BOE' in image_path:
-        mask_path = image_path.replace('/images/', '/mask/')
-    elif 'RESC' in image_path:
-        mask_path = image_path.replace('/RESC/', '/RESC/mask/').replace('original_images/', '')
-    elif 'NORMAL' in image_path:
-        mask_path = image_path.replace('train/0.normal', 'normal_mask')
+    if "BOE" in image_path:
+        mask_path = image_path.replace("/images/", "/mask/")
+    elif "RESC" in image_path:
+        mask_path = image_path.replace("/RESC/", "/RESC/mask/").replace(
+            "original_images/", ""
+        )
+    elif "NORMAL" in image_path:
+        mask_path = image_path.replace("train/0.normal", "normal_mask")
     else:
-        mask_path = image_path.replace('original', 'mask')
+        mask_path = image_path.replace("original", "mask")
     return mask_path
 
-class SegmentationModelOutputWrapper(torch.nn.Module):
-    def __init__(self, model):
-        super(SegmentationModelOutputWrapper, self).__init__()
-        self.model = model
 
-    def forward(self, x):
-        return self.model(x)[0]
+def load_mask(image_path):
+    orig_mask = np.asarray(Image.open(get_mask_path_by_image_path(image_path)))[..., 0]
+    orig_mask[orig_mask > 150] = 255
+    orig_mask[orig_mask <= 150] = 0
+    return orig_mask
+
+
+def get_annot_by_dataset(opts, img_name):
+    if "our_dataset" in opts.root_dirs:
+        if opts.expert_annot == "both":
+            annot_path = os.path.join(
+                opts.root_dirs, opts.annot_dir, img_name.split(".")[0] + ".png"
+            )
+        else:
+            expert_annot_img_name = img_name.split(".")[0] + f"_{opts.expert_annot}.png"
+            annot_path = os.path.join(
+                opts.root_dirs, opts.annot_dir, expert_annot_img_name
+            )
+    else:
+        annot_path = os.path.join(
+            opts.root_dirs, opts.annot_dir, img_name
+        )  # resc valid/label_images
+    orig_annot = np.asarray(Image.open(annot_path))
+    return orig_annot
 
 
 def reshape_transform_vit(tensor, height=14, width=14):
@@ -72,6 +94,7 @@ def reshape_transform_swim(tensor, height=7, width=7):
     # like in CNNs.
     result = result.transpose(2, 3).transpose(1, 2)
     return result
+
 
 def reshape_transform(tensor):
     if tensor.shape[1] != 197 and tensor.shape[1] != 49:
@@ -96,7 +119,7 @@ def normalized_batch_tensor(t):
     return t
 
 
-def diff_map_for_att(orig_tensor, gan_tensor, mask_tensor):
+def diff_map_for_att(orig_tensor, gan_tensor, mask_tensor=None):
     # batch, channel, h, w
     normalized_orig = orig_tensor.clone()
     normalized_gan = gan_tensor.clone()
@@ -105,6 +128,9 @@ def diff_map_for_att(orig_tensor, gan_tensor, mask_tensor):
     normalized_gan = normalized_batch_tensor(normalized_gan)
 
     abs_diff = torch.abs(normalized_orig - normalized_gan)
+    if mask_tensor is None:
+        return abs_diff
+
     mask_out_diff = abs_diff * mask_tensor
 
     return mask_out_diff
@@ -137,31 +163,42 @@ def convert_resc_labels(img):
     img[img == 128] = 2
     return img
 
+
 def convert_duke_labels(img):
     img[img < 255] = 0
     img[img == 255] = 1
     return img
 
+
 def convert_our_dataset_labels(img):
     # "categories":[{"id":51,"name":"IRF"},{"id":102,"name":"SRF"},{"id":153,"name":"HRD"},{"id":204,"name":"EZ disruption"},{"id":255,"name":"RPE "}]}
     # ['SRF', 'IRF', 'EZ disrupted', 'HRD', 'BackGround']
-    img[img==51] = 2
-    img[img==102] = 1
-    img[img==153] = 4
-    img[img==204] = 3
-    img[img==255] = 0 # we dont include RPE for now
-    
+    img[img == 51] = 2
+    img[img == 102] = 1
+    img[img == 153] = 4
+    img[img == 204] = 3
+    img[img == 255] = 0  # we dont include RPE for now
+
     return img
 
+
 def convert_data_labels(img, root_dirs):
-    if 'RESC' in root_dirs:
-        return convert_resc_labels(img)
-    if 'BOE' in root_dirs:
-        return convert_duke_labels(img)
-    return convert_our_dataset_labels(img)
+    norm_img = img.copy()
+    if "RESC" in root_dirs:
+        return convert_resc_labels(norm_img)
+    if "BOE" in root_dirs:
+        return convert_duke_labels(norm_img)
+    return convert_our_dataset_labels(norm_img)
+
+
+def get_resc_train_annot(img_name):
+    annot_path = os.path.join("datasets/RESC/train/label_images", img_name)
+    orig_annot = np.asarray(Image.open(annot_path))
+    return convert_resc_labels(orig_annot)
+
 
 def post_process_cam(resized_cam, orig_mask=None):
-    masked_cam = resized_cam 
+    masked_cam = resized_cam
     if orig_mask is not None:
         mask_clone = orig_mask.copy()  # NEUROSENSORY RETINA only (ILM to RPE)
         mask_clone[mask_clone == 0] = 0.5
@@ -176,6 +213,16 @@ def post_process_cam(resized_cam, orig_mask=None):
     norm_masked_cam = (masked_cam - cam_min - 1e-5) / (cam_max - cam_min + 1e-5)
 
     return norm_masked_cam
+
+
+class SegmentationModelOutputWrapper(torch.nn.Module):
+    def __init__(self, model):
+        super(SegmentationModelOutputWrapper, self).__init__()
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)  # [0]
+
 
 class CAMGeneratorAndSave:
     def __init__(self, opts, multi_task_model, epoch=None) -> None:
@@ -196,7 +243,7 @@ class CAMGeneratorAndSave:
         if rgb_img.ndim == 2:
             rgb_img = np.repeat(rgb_img[..., np.newaxis], 3, -1)
 
-        target_layers= self.multi_task_model.get_cam_target_layers()
+        target_layers = self.multi_task_model.get_cam_target_layers()
         extend_input_tensor = self.updated_image.repeat(
             get_num_classes(), 1, 1, 1
         )  # [1, 9, 512, 512] -> [2, 9, 512, 512]
@@ -206,17 +253,43 @@ class CAMGeneratorAndSave:
             if OrgLabels[cls] != "BackGround"
         ]
         # print(self.model)
-        with GradCAM(model=self.model, use_cuda="cuda", target_layers=target_layers, reshape_transform=reshape_transform) as cam:
-            grayscale_cam = cam(input_tensor=extend_input_tensor, targets=targets, eigen_smooth=False, aug_smooth=self.opts.aug_smooth)
+        # startt = time.time()
+        with GradCAM(
+            model=self.model,
+            use_cuda="cuda",
+            target_layers=target_layers,
+            reshape_transform=reshape_transform,
+        ) as cam:
+            # import pdb; pdb.set_trace()
+            grayscale_cam = cam(
+                input_tensor=extend_input_tensor,
+                targets=targets,
+                eigen_smooth=False,
+                aug_smooth=self.opts.aug_smooth,
+            )
+            # print(grayscale_cam)
             # [cls, w, h]
+        # print(time.time()-startt)
+
         resized_cam = F.interpolate(
-            torch.from_numpy(grayscale_cam).unsqueeze(0), # [1, cls, w, h]
+            torch.from_numpy(grayscale_cam).unsqueeze(0),  # [1, cls, w, h]
             size=orig_mask.shape,
             mode="bilinear",
             align_corners=False,
-        )[0].numpy() # [cls, w, h] numpy
+        )[
+            0
+        ].numpy()  # [cls, w, h] numpy
 
         norm_resized_cam = post_process_cam(resized_cam, orig_mask)
+        # '''save the prob heat map'''
+        # gt_lesions = np.unique(norm_annot[norm_annot!=0])
+        # save_file = {i_c-1: norm_resized_cam[i_c-1] for i_c in gt_lesions}
+        # n = self.img_name.split('.')[0]
+        # # np.save(f'paper/abl-heads/8/{n}.npy', save_file)
+        # np.save(f'datasets/our_dataset/pseudo_map/{n}.npy', save_file)
+        # '''end'''
+        
+        # import pdb; pdb.set_trace()
         bg_score = [np.ones_like(norm_resized_cam[0]) * self.opts.out_cam_pred_alpha]
         pred_with_bg_score = np.concatenate((bg_score, norm_resized_cam))
 
@@ -252,26 +325,14 @@ class CAMGeneratorAndSave:
         return save_cam_in_row, pred_labels
 
     def save_cam_process(self, batch_nb):
-        img_name = self.inputs["path"][batch_nb].split("/")[-1]
+        self.img_name = self.inputs["path"][batch_nb].split("/")[-1]
         # 0-255 pixel value, numpy
         image_path = self.inputs["path"][batch_nb]
         orig_img = np.asarray(Image.open(image_path))
         if len(orig_img.shape) == 3:
-            orig_img = orig_img[...,0]
-        orig_mask = np.asarray(Image.open(get_mask_path_by_image_path(image_path)))[..., 0]
-        
-        orig_mask[orig_mask>150]=255
-        orig_mask[orig_mask<=150]=0
-        
-        if 'our_dataset' in self.opts.root_dirs:
-            if self.opts.expert_annot == 'both':
-                annot_path = os.path.join(self.opts.root_dirs, self.opts.annot_dir, img_name.split('.')[0] + '.png')
-            else:
-                expert_annot_img_name = img_name.split('.')[0] + f'_{self.opts.expert_annot}.png'
-                annot_path = os.path.join(self.opts.root_dirs, self.opts.annot_dir, expert_annot_img_name)
-        else:
-            annot_path = os.path.join(self.opts.root_dirs, self.opts.annot_dir, img_name) # resc valid/label_images
-        orig_annot = np.asarray(Image.open(annot_path))
+            orig_img = orig_img[..., 0]
+        orig_mask = load_mask(image_path)
+        orig_annot = get_annot_by_dataset(self.opts, self.img_name)
 
         true_classes = [
             i for i, v in enumerate(self.inputs["labels"][batch_nb]) if v > 0.5
@@ -283,11 +344,13 @@ class CAMGeneratorAndSave:
 
         if self.is_inference:
             save_path = os.path.join(
-                self.opts.save_inference, "{}".format(img_name.split(".")[0])
+                self.opts.save_inference, "{}".format(self.img_name.split(".")[0])
             )
         else:
             save_path = os.path.join(
-                self.opts.save_folder, "iteration", "{}".format(img_name.split(".")[0])
+                self.opts.save_folder,
+                "iteration",
+                "{}".format(self.img_name.split(".")[0]),
             )
         if self.save_results:
             if not os.path.exists(save_path):
@@ -333,7 +396,8 @@ class CAMGeneratorAndSave:
             )
             gt.append(gt_labels)
             ready_pred_4d.append(pred_labels)
-
+            cv2.imwrite('datasets/RESC/pseudo_label_2/{}.png'.format(self.img_name.split('.')[0]), pred_labels)
+            # import pdb; pdb.set_trace()
             if not self.save_results:
                 continue
             single_pred_cls = [i for i, v in enumerate(single_pred) if v > 0.5]
@@ -344,6 +408,11 @@ class CAMGeneratorAndSave:
                     if OrgLabels[cls] != "BackGround"
                 ]
             )
+            # for paper
+            # for i, each in enumerate(save_cam_in_row):
+            #     cv2.imwrite(
+            #         'paper/refine-illu' + "/{}.png".format(i), np.array(each)
+            #     )
             if len(save_cam_in_row):
                 im_h = cv2.hconcat(save_cam_in_row)
                 if self.is_inference:
@@ -358,21 +427,98 @@ class CAMGeneratorAndSave:
                     )
         return gt, ready_pred_4d
 
+    def get_pseudo_labels(self, params):
+        self.inputs, self.updated_image = (params["inputs"], params["refined"])
+        ready_pred_4d = []
+        gt = []
+        for batch_nb, sing_labels in enumerate(self.inputs["labels"]):
+            ground_true_classes = [i for i, v in enumerate(sing_labels) if v > 0.5]
+            # only calculate and save for ground truth lesion images
+            if not len(set(self.lesion_classes) & set(ground_true_classes)):
+                continue
+            self.img_name = self.inputs["path"][batch_nb].split("/")[-1]
+            # 0-255 pixel value, numpy
+            image_path = self.inputs["path"][batch_nb]
+            orig_mask = load_mask(image_path)
+            # norm_annot = get_resc_train_annot(self.img_name)
 
-def save_models(args, epoch, multi_task_model, multi_optimizer, best_type=None, is_iter=False):
+            target_layers = self.multi_task_model.get_cam_target_layers()
+            extend_input_tensor = self.updated_image.repeat(
+                get_num_classes(), 1, 1, 1
+            )  # [1, 9, 512, 512] -> [2, 9, 512, 512]
+            targets = [
+                ClassifierOutputTarget(cls)
+                for cls in range(len(OrgLabels))
+                if OrgLabels[cls] != "BackGround"
+            ]
+            with GradCAM(
+                model=self.model,
+                use_cuda="cuda",
+                target_layers=target_layers,
+                reshape_transform=reshape_transform,
+            ) as cam:
+                grayscale_cam = cam(
+                    input_tensor=extend_input_tensor,
+                    targets=targets,
+                    eigen_smooth=False,
+                    aug_smooth=True,
+                )
+            resized_cam = F.interpolate(
+                torch.from_numpy(grayscale_cam).unsqueeze(0),  # [1, cls, w, h]
+                size=orig_mask.shape,
+                mode="bilinear",
+                align_corners=False,
+            )[
+                0
+            ].numpy()  # [cls, w, h] numpy
+
+            norm_resized_cam = post_process_cam(resized_cam, orig_mask)
+            """Generate all cams except the ones that are not in ground true classes"""
+            for i in range(get_num_classes()):
+                if i not in ground_true_classes:
+                    norm_resized_cam[i] = 0
+                    continue
+            # import pdb; pdb.set_trace()
+            img_save_name = self.img_name.split('.')[0]
+            #  for duke
+            # img_save_name = (
+            #     self.inputs["path"][batch_nb].replace("/", "+").rsplit(".", 1)[0]
+            # )
+            # np.save(f'abl_backbone_maps/resc_resnet18/{img_save_name}.npy', norm_resized_cam)
+            # import pdb; pdb.set_trace()
+            bg_score = [
+                np.ones_like(norm_resized_cam[0]) * self.opts.out_cam_pred_alpha
+            ]
+            pred_with_bg_score = np.concatenate((bg_score, norm_resized_cam))
+
+            pred_labels = np.argmax(pred_with_bg_score, axis=0)  # [0 - num_class]
+            # import pdb; pdb.set_trace()
+            save_pseudo_label_path = os.path.join(
+                self.opts.root_dirs, "pseudo_label_2", img_save_name + ".png"
+            )
+            cv2.imwrite(save_pseudo_label_path, pred_labels)
+
+            # gt.append(norm_annot)
+            ready_pred_4d.append(pred_labels)
+        return gt, ready_pred_4d
+
+
+def save_models(
+    args, epoch, multi_task_model, multi_optimizer, best_type=None, is_iter=False
+):
     save_path = f"./{args.save_folder}/weights"
     if best_type is None:
         save_name = epoch + 1
-    elif best_type == 'pseudo':
-        save_name = 'best_iou'
-    elif best_type == 'cls':
+    elif best_type == "pseudo":
+        save_name = "best_iou"
+    elif best_type == "cls":
         save_name = "best"
     else:
-        raise ValueError('The type for save model is not available')
+        raise ValueError("The type for save model is not available")
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     if is_iter:
-        save_name = f'iter_{save_name}'
+        save_name = f"{is_iter}_{save_name}"
     torch.save(
         {
             "epoch": epoch,
@@ -382,6 +528,7 @@ def save_models(args, epoch, multi_task_model, multi_optimizer, best_type=None, 
         },
         save_path + "/{0}.pwf".format(save_name),
     )
+
 
 def save_tensorboard_val(tb, loss_dict, mark_epoch):
     tb.add_scalar("Loss/Valid", loss_dict["total_val_loss"], mark_epoch + 1)
@@ -404,7 +551,8 @@ def save_tensorboard_val(tb, loss_dict, mark_epoch):
             mark_epoch + 1,
         )
     tb.close()
-    
+
+
 def save_tensorboard_train(tb, loss_dict, mark_epoch):
     tb.add_scalar("Loss/Train", loss_dict["total_train_loss"], mark_epoch + 1)
     tb.add_scalar("ROC/Train", loss_dict["total_train_roc"], mark_epoch + 1)
@@ -424,7 +572,7 @@ def save_tensorboard_train(tb, loss_dict, mark_epoch):
             "Train Class ROC/{}".format(label_type),
             loss_dict["total_train_roc_matrix"][label_type],
             mark_epoch + 1,
-        )        
+        )
     tb.close()
 
 

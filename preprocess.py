@@ -4,11 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 # from medpy.filter.smoothing import anisotropic_diffusion
 import cv2 as cv
-
+import torchvision.transforms as T
 import pandas as pd
 import shutil
 
-from metrics import scores
+from utils.metrics import scores
+from utils.utils import convert_our_dataset_labels
 
 IMAGES_DIR = "train/"
 IMAGES_LABELED_DIR = "train_label"
@@ -164,6 +165,32 @@ def background_mask(image):
     cv.drawContours(mask, largest_area, 0, (255,255,255), cv.FILLED)
 
     return mask[:,:,0]
+
+def generate_background_mask_for_GAN(image_tensor):
+    # define a transform to convert a tensor to PIL image
+    transform = T.ToPILImage()
+
+    # convert the tensor to PIL image using above transform
+    image = transform(image_tensor)
+    
+    image = image.filter(ImageFilter.MinFilter(3))
+    image = ImageEnhance.Contrast(image).enhance(2)
+
+    image = np.array(image)
+    gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    mask = np.zeros(image.shape, np.uint8)
+    
+    gray = cv.medianBlur(gray, 5)
+    ret, gray = cv.threshold(gray, 30,255, cv.THRESH_BINARY)
+
+    closing_kernel = np.ones((15,15),np.uint8)
+    closing = cv.morphologyEx(gray, cv.MORPH_CLOSE, closing_kernel, iterations=1)
+
+    contours, _ = cv.findContours(closing.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    largest_area = sorted(contours, key=cv.contourArea)[-1:]
+    cv.drawContours(mask, largest_area, 0, (255,255,255), cv.FILLED)
+
+    return mask
 
 def generate_background_mask(image_path):
     img = np.array(cv.imread(image_path))
@@ -363,6 +390,58 @@ def union_exps_annotations(ex1, ex2, updated_img, id_num):
     updated_img[(ex1==id_num) | (ex2==id_num)] = id_num
     return updated_img
 
+def intersect_exps_annotations(ex1, ex2, updated_img):
+    updated_img[(ex1==51) & (ex2==51)] = 51
+    updated_img[(ex1==102) & (ex2==102)] = 102
+    updated_img[(ex1==153) & (ex2==153)] = 153
+    updated_img[(ex1==204) & (ex2==204)] = 204
+    return updated_img
+
+
+def intersect_human_annots():
+    list_of_annotations = glob.glob('datasets/our_dataset/annotation_v2/*')
+    mina_list = sorted([x for x in list_of_annotations if 'mina' in x])
+    meera_list = sorted([x for x in list_of_annotations if 'meera' in x])
+    updated_img_labels = []
+    # "categories":[{"id":51,"name":"IRF"},{"id":102,"name":"SRF"},{"id":153,"name":"HRD"},{"id":204,"name":"EZ disruption"},{"id":255,"name":"RPE"}]}
+    # ['SRF', 'IRF', 'EZ disrupted', 'HRD', 'BackGround']
+    mina_collect = []
+    meera_collect = []
+    for mina, meera in zip(mina_list, meera_list):
+        curr_img_label = {'IRF': 0, 'SRF': 0, 'EZ disrupted': 0, 'HRD': 0}
+        assert mina.split('_')[0] == meera.split('_')[0]
+        mina_img = np.array(Image.open(mina))
+        meera_img = np.array(Image.open(meera))
+        img_name = mina.split('/')[-1].split('_')[0] + '.jpeg'
+        curr_img_label['img'] = img_name
+        
+        unioned_image = np.zeros_like(mina_img)
+        unioned_image = intersect_exps_annotations(mina_img, meera_img, unioned_image)
+        if 51 in unioned_image:
+            curr_img_label['IRF'] = 1
+        if 102 in unioned_image:
+            curr_img_label['SRF'] = 1
+        if 153 in unioned_image:
+            curr_img_label['HRD'] = 1
+        if 204 in unioned_image:
+            curr_img_label['EZ disrupted'] = 1
+        # if 51 in mina_img and 51 in meera_img and 51 not in unioned_image:
+        #     import pdb; pdb.set_trace()
+        updated_img_labels.append(curr_img_label)
+        mina_img_norm = convert_our_dataset_labels(mina_img.copy())
+        meera_img_norm = convert_our_dataset_labels(meera_img.copy())
+        mina_collect.append(mina_img_norm)
+        meera_collect.append(meera_img_norm)
+        
+        save_mask = Image.fromarray((unioned_image).astype(np.uint8))
+        save_mask.save('datasets/our_dataset/annot_combine/' + img_name.replace('.jpeg', '.png'))
+    import pdb; pdb.set_trace
+    pd.DataFrame(updated_img_labels).to_csv('datasets/our_dataset/combine_labels.csv')
+    print(scores(mina_collect, meera_collect, n_class=5))
+    # import pdb; pdb.set_trace()
+    return
+
+
 def combine_human_annots():
     list_of_annotations = glob.glob('datasets/our_dataset/annotation_v2/*')
     mina_labels = pd.read_csv('datasets/our_dataset/mina_labels.csv', index_col=0)
@@ -443,5 +522,4 @@ if __name__ == "__main__":
     
     # analyze_annotations()
     # save_human_label()
-    inter_areas = combine_human_annots()
-    print(inter_areas)
+    intersect_human_annots()

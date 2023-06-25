@@ -3,17 +3,19 @@ import numpy as np
 from PIL import Image, ImageEnhance
 from torch.utils.data import Dataset
 from torchvision import transforms
-from utils import OrgLabels, get_mask_path_by_image_path
+from utils.utils import OrgLabels, convert_resc_labels, get_mask_path_by_image_path
 import torch
 import pandas as pd
 import random
 import logging
 import torchvision.transforms.functional as TF
+import torchvision.utils as vutils
+
 
 # pd.set_option("display.max_rows", None)
 logging.getLogger('PIL').setLevel(logging.WARNING)
 
-def img_transform(img, mask, is_size, data_type):
+def img_transform(img, mask, is_size, data_type, is_seg=False, healthy_v=None):
     # to PIL
     to_pil = transforms.ToPILImage()
     img, mask = to_pil(img), to_pil(mask)
@@ -27,7 +29,7 @@ def img_transform(img, mask, is_size, data_type):
         # Random color for image
         color_jitter = transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)
         img = color_jitter(img)
-        
+
         # Random flip
         if random.random() > 0.5:
             img, mask = TF.hflip(img), TF.hflip(mask)
@@ -38,12 +40,27 @@ def img_transform(img, mask, is_size, data_type):
         img = rotate(img)
         torch.set_rng_state(state)
         mask = rotate(mask)
-    
+
     # to tensor
     to_tensor = transforms.ToTensor()
-    img, mask = to_tensor(img), to_tensor(mask)
+    if not is_seg:
+        mask = to_tensor(mask)
+    else:
+        mask = torch.LongTensor(np.asarray(mask))
+    img = to_tensor(img)
     
     return img, mask
+
+def gan_normalize_transform(img, is_size):
+    to_pil = transforms.ToPILImage()
+    img = to_pil(img)
+    resize_img = transforms.Resize(is_size)
+    img = resize_img(img)
+    to_tensor = transforms.ToTensor()
+    img = to_tensor(img)
+    transform_norml = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    img = transform_norml(img)
+    return img
 
 class OCTDataset(Dataset): 
     def __init__(self, args, data_type, infer_list=[]):
@@ -86,13 +103,13 @@ class OCTDataset(Dataset):
         else:
             labels_df = self.labels_table.loc[self.labels_table['img'] == image_name]
             labels = torch.FloatTensor([labels_df[x].to_numpy()[0] for x in OrgLabels])
-        return {'image': image_tensor, 'labels': labels, 'path': data_path, 'mask': mask_tensor}
+        return {'image': image_tensor, 'labels': labels, 'path': data_path, 'mask': mask_tensor, 'shape': image_arr.shape, 'mask_path': mask_path}
     
     def __len__(self):
         return len(self.file_list[self.data_type])
     
 class RESCDataset(Dataset):
-    def __init__(self, args, data_type, infer_list=[]):
+    def __init__(self, args, data_type, infer_list=[], is_generate_pseudo_label=False):
         self.file_list = {'train': glob.glob("{}/train/original_images/*".format(args.root_dirs)), 'test': glob.glob("{}/valid/original_images/*".format(args.root_dirs))}
         self.mask_list = {'train': glob.glob("{}/train/*".format(args.mask_dir)), 'test': glob.glob("{}/valid/*".format(args.mask_dir))}
         self.labels_list = np.load('{}/resc_cls_labels.npy'.format(args.root_dirs), allow_pickle=True).item()
@@ -101,6 +118,8 @@ class RESCDataset(Dataset):
             self.mask_list = {'inference': ["{}/valid/{}".format(args.mask_dir, item) for item in infer_list]}
         self.data_type = data_type
         self.args = args
+        self.is_generate_pseudo_label = is_generate_pseudo_label
+        # self.gan_pretrained = gan_pretrained
 
     def __getitem__(self, idx):
         data_path = sorted(self.file_list[self.data_type])[idx]
@@ -111,18 +130,23 @@ class RESCDataset(Dataset):
         image_arr = np.asarray(image)        
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
-        
-        image_tensor, mask_tensor = img_transform(image_arr, mask, self.args.is_size, self.data_type)
+        transform_type = 'test' if self.is_generate_pseudo_label else self.data_type
+        # with torch.no_grad():
+        #     org_img = gan_normalize_transform(image_arr, self.args.is_size)
+        #     healthy_v = self.gan_pretrained.inference(org_img.unsqueeze(0)).squeeze(0)
+        #     vutils.save_image(healthy_v, 'healthy_v.png', normalize=True)
+        # import pdb; pdb.set_trace()
+        image_tensor, mask_tensor= img_transform(image_arr, mask, self.args.is_size, transform_type)
         
         img_name = data_path.split('/')[-1].split('.')[0]
         image_label = np.append(self.labels_list[img_name], [1]) if 'BackGround' in OrgLabels else self.labels_list[img_name]
-        return {'image': image_tensor, 'labels': torch.from_numpy(image_label), 'path': data_path, 'mask': mask_tensor}
+        return {'image': image_tensor, 'labels': torch.from_numpy(image_label), 'path': data_path, 'mask': mask_tensor, 'shape': image_arr.shape, 'mask_path': mask_path}
 
     def __len__(self):
         return len(self.file_list[self.data_type])
 
 class DukeDataset(Dataset):
-    def __init__(self, args, data_type, infer_list=[]):
+    def __init__(self, args, data_type, infer_list=[], is_generate_pseudo_label=False):
         self.dataset_df = {'train': pd.read_csv('{}/train.csv'.format(args.root_dirs), index_col=0), 'test': pd.read_csv('{}/valid.csv'.format(args.root_dirs), index_col=0)}
         if data_type == 'inference':
             val_df = pd.read_csv("{}/valid.csv".format(args.root_dirs), index_col=0)
@@ -132,6 +156,7 @@ class DukeDataset(Dataset):
             self.dataset_df = {'inference': val_df}
         self.data_type = data_type
         self.args = args
+        self.is_generate_pseudo_label = is_generate_pseudo_label
 
     def __getitem__(self, idx):
         target_row = self.dataset_df[self.data_type].sort_values('path').iloc[idx]
@@ -146,10 +171,158 @@ class DukeDataset(Dataset):
         image_arr = np.asarray(image)
         if (image_arr.ndim == 2):
             image_arr = np.repeat(image_arr[..., np.newaxis], 3, -1)
-        image_tensor, mask_tensor = img_transform(image_arr, mask, self.args.is_size, self.data_type)
-        return {'image': image_tensor, 'labels': torch.FloatTensor([target_label, 1]), 'path': target_path, 'mask': mask_tensor}
+        transform_type = 'test' if self.is_generate_pseudo_label else self.data_type
+        image_tensor, mask_tensor = img_transform(image_arr, mask, self.args.is_size, transform_type)
+        return {'image': image_tensor, 'labels': torch.FloatTensor([target_label, 1]), 'path': target_path, 'mask': mask_tensor, 'shape': image_arr.shape, 'mask_path': mask_path}
     def __len__(self):
         return len(self.dataset_df[self.data_type])
+
+
+class SegmentRESCDataset(Dataset):
+    def __init__(self, args, data_type, infer_list=[]):
+        self.labels_list = {'train': glob.glob("{}/pseudo_label/*".format(args.root_dirs))}
+        save_labels = np.load(f'{args.root_dirs}/resc_cls_labels.npy', allow_pickle=True).item()
+        test_label_paths = glob.glob("{}/valid/label_images/*".format(args.root_dirs))
+        seg_label_paths = [x for x in test_label_paths if save_labels[x.split('/')[-1].split('.')[0]].sum() > 0]
+        self.labels_list['test'] = seg_label_paths
+        if data_type == 'inference':
+            self.labels_list = {'inference': ["{}/valid/label_images/{}".format(args.mask_dir, item) for item in infer_list]}
+        self.data_type = data_type
+        self.args = args
+
+    def __getitem__(self, idx):
+        data_path = sorted(self.labels_list[self.data_type])[idx]
+        img_name = data_path.split('/')[-1].split('.')[0]
+        d_path = 'train' if self.data_type == 'train' else 'valid'
+        orig_img_path = f"{self.args.root_dirs}/{d_path}/original_images/{img_name}.bmp"
+        image = np.asarray(Image.open(orig_img_path))
+        annot = np.asarray(Image.open(data_path))
+        if self.data_type != 'train':
+            annot = convert_resc_labels(annot)
+        if (image.ndim == 2):
+            image = np.repeat(image[..., np.newaxis], 3, -1)
+        image_tensor, annot_tensor = img_transform(image, annot, self.args.is_size, self.data_type, is_seg=True)
+        # import pdb; pdb.set_trace()
+        return {'image': image_tensor, 'labels': annot_tensor, 'path': data_path}
+
+    def __len__(self):
+        return len(self.labels_list[self.data_type])
+
+"""
+Author: Manpreet Singh Minhas
+Contact: msminhas at uwaterloo ca
+"""
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+from torchvision.datasets.vision import VisionDataset
+
+
+class SegmentationDataset(VisionDataset):
+    """A PyTorch dataset for image segmentation task.
+    The dataset is compatible with torchvision transforms.
+    The transforms passed would be applied to both the Images and Masks.
+    """
+    def __init__(self,
+                 root: str,
+                 image_folder: str,
+                 mask_folder: str,
+                 transforms: Optional[Callable] = None,
+                 seed: int = None,
+                 fraction: float = None,
+                 subset: str = None,
+                 image_color_mode: str = "rgb",
+                 mask_color_mode: str = "grayscale") -> None:
+        """
+        Args:
+            root (str): Root directory path.
+            image_folder (str): Name of the folder that contains the images in the root directory.
+            mask_folder (str): Name of the folder that contains the masks in the root directory.
+            transforms (Optional[Callable], optional): A function/transform that takes in
+            a sample and returns a transformed version.
+            E.g, ``transforms.ToTensor`` for images. Defaults to None.
+            seed (int, optional): Specify a seed for the train and test split for reproducible results. Defaults to None.
+            fraction (float, optional): A float value from 0 to 1 which specifies the validation split fraction. Defaults to None.
+            subset (str, optional): 'Train' or 'Test' to select the appropriate set. Defaults to None.
+            image_color_mode (str, optional): 'rgb' or 'grayscale'. Defaults to 'rgb'.
+            mask_color_mode (str, optional): 'rgb' or 'grayscale'. Defaults to 'grayscale'.
+        Raises:
+            OSError: If image folder doesn't exist in root.
+            OSError: If mask folder doesn't exist in root.
+            ValueError: If subset is not either 'Train' or 'Test'
+            ValueError: If image_color_mode and mask_color_mode are either 'rgb' or 'grayscale'
+        """
+        super().__init__(root, transforms)
+        image_folder_path = Path(self.root) / image_folder
+        mask_folder_path = Path(self.root) / mask_folder
+        if not image_folder_path.exists():
+            raise OSError(f"{image_folder_path} does not exist.")
+        if not mask_folder_path.exists():
+            raise OSError(f"{mask_folder_path} does not exist.")
+
+        if image_color_mode not in ["rgb", "grayscale"]:
+            raise ValueError(
+                f"{image_color_mode} is an invalid choice. Please enter from rgb grayscale."
+            )
+        if mask_color_mode not in ["rgb", "grayscale"]:
+            raise ValueError(
+                f"{mask_color_mode} is an invalid choice. Please enter from rgb grayscale."
+            )
+
+        self.image_color_mode = image_color_mode
+        self.mask_color_mode = mask_color_mode
+
+        if not fraction:
+            self.image_names = sorted(image_folder_path.glob("*"))
+            self.mask_names = sorted(mask_folder_path.glob("*"))
+        else:
+            if subset not in ["Train", "Test"]:
+                raise (ValueError(
+                    f"{subset} is not a valid input. Acceptable values are Train and Test."
+                ))
+            self.fraction = fraction
+            self.image_list = np.array(sorted(image_folder_path.glob("*")))
+            self.mask_list = np.array(sorted(mask_folder_path.glob("*")))
+            if seed:
+                np.random.seed(seed)
+                indices = np.arange(len(self.image_list))
+                np.random.shuffle(indices)
+                self.image_list = self.image_list[indices]
+                self.mask_list = self.mask_list[indices]
+            if subset == "Train":
+                self.image_names = self.image_list[:int(
+                    np.ceil(len(self.image_list) * (1 - self.fraction)))]
+                self.mask_names = self.mask_list[:int(
+                    np.ceil(len(self.mask_list) * (1 - self.fraction)))]
+            else:
+                self.image_names = self.image_list[
+                    int(np.ceil(len(self.image_list) * (1 - self.fraction))):]
+                self.mask_names = self.mask_list[
+                    int(np.ceil(len(self.mask_list) * (1 - self.fraction))):]
+
+    def __len__(self) -> int:
+        return len(self.image_names)
+
+    def __getitem__(self, index: int) -> Any:
+        image_path = self.image_names[index]
+        mask_path = self.mask_names[index]
+        with open(image_path, "rb") as image_file, open(mask_path,
+                                                        "rb") as mask_file:
+            image = Image.open(image_file)
+            if self.image_color_mode == "rgb":
+                image = image.convert("RGB")
+            elif self.image_color_mode == "grayscale":
+                image = image.convert("L")
+            mask = Image.open(mask_file)
+            if self.mask_color_mode == "rgb":
+                mask = mask.convert("RGB")
+            elif self.mask_color_mode == "grayscale":
+                mask = mask.convert("L")
+            sample = {"image": image, "mask": mask}
+            if self.transforms:
+                sample["image"] = self.transforms(sample["image"])
+                sample["mask"] = self.transforms(sample["mask"])
+            return sample
 
 if __name__ == "__main__":
     '''
