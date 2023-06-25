@@ -41,3 +41,6 @@ abl_backbone_maps/
 
 # npy ignore
 *.npy
+
+# setup ignore
+*.egg-info/
