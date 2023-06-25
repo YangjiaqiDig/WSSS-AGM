@@ -17,6 +17,8 @@ gozde/
 outputs*/
 pretrained/
 runs*
+*.csv
+*.txt
 
 # dataset ignore
 deprecated.zip
