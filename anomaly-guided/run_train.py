@@ -18,7 +18,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = DEVICE_NR
 from gan_inference import load_gan_model
 from dataset import DukeDataset, OCTDataset, RESCDataset
 from refine_pseudo_label import refine_input_by_cam, get_pseudo_label
-from network.aam import AAM
+from network.agm import AGM
 from network.single_models import CNNs
 
 from utils.utils import (
@@ -30,9 +30,13 @@ from utils.utils import (
     save_tensorboard_train,
     save_tensorboard_val,
 )
-from utils.metrics import calculate_classification_metrics, calculate_roc
+from utils.metrics import (
+    calculate_classification_metrics,
+    calculate_roc,
+    scores,
+    record_score,
+)
 from options import Configs
-from utils.metrics import scores, record_score
 
 
 class Train:
@@ -242,8 +246,8 @@ class Train:
         return dataset_train, dataset_test
 
     def get_models(self):
-        if self.args.retinal_model == "AAM":
-            retinal_model_func = AAM
+        if self.args.retinal_model == "AGM":
+            retinal_model_func = AGM
         elif self.args.retinal_model == "CNNs":
             retinal_model_func = CNNs
         else:

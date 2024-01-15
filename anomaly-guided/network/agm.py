@@ -66,11 +66,11 @@ class ResTransBlock(nn.Module):
         return pred_output
 
 
-class AAM(nn.Module):
+class AGM(nn.Module):
     def __init__(
         self, backbone, num_class, num_input_channel=3, backbone_name="resnet18"
     ):
-        super(AAM, self).__init__()
+        super(AGM, self).__init__()
         self.backbone_name = backbone_name
         self.base_model = backbone  # take the model without classifier
         self.num_input_channel = num_input_channel
@@ -152,7 +152,7 @@ class AAM(nn.Module):
 if __name__ == "__main__":
     RESNet = models.resnet50(pretrained=True)
     # print(RESNet)
-    MultiModel = AAM(
+    MultiModel = AGM(
         RESNet, num_class=5, num_input_channel=12, backbone_name="resnet50"
     )
     print(MultiModel)

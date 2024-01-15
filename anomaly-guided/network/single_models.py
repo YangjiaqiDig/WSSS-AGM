@@ -1,7 +1,6 @@
 import torch.nn as nn
 import torchvision.models as models
 import torch
-import torch.nn.functional as F
 
 from network.attention_models import VitBlock, SwimTBlock
 
@@ -12,8 +11,6 @@ class Transformers(nn.Module):
         super(Transformers, self).__init__()
         # self.vit = VitBlock(num_class, num_input_channel=num_input_channel)
         self.swimT = SwimTBlock(num_class, num_input_channel=num_input_channel)
-    def assign_conditions(self, include_seg_key=False):
-        self.include_segment = include_seg_key
 
     def get_cam_target_layers(self):
         # res = [self.vit.vit_model.blocks[-1].norm1]
@@ -28,12 +25,8 @@ class Transformers(nn.Module):
             input_tensor = concated_tensors
         # pred_output = self.vit(input_tensor)
         pred_output = self.swimT(input_tensor)
-        
-        segmentation_pred = None
-        # segmentation output
-        if self.include_segment:
-            segmentation_pred = None
-        return pred_output, segmentation_pred
+
+        return pred_output
 
 class CNNs(nn.Module):
     def __init__(
@@ -47,9 +40,6 @@ class CNNs(nn.Module):
         )
         self.base_model.fc = nn.Linear(num_channels_fc[backbone_name], num_class, bias=True)
         self.include_segment = False
-
-    def assign_conditions(self, include_seg_key=False):
-        self.include_segment = include_seg_key
 
     def get_cam_target_layers(self):
         res = [self.base_model.layer4[-1]]
@@ -65,14 +55,7 @@ class CNNs(nn.Module):
         # classification output
         multi_label_pred = self.base_model(input_tensor)
 
-        segmentation_pred = None
-        # segmentation output
-        if self.include_segment:
-            segmentation_pred = None
-
-        return multi_label_pred, segmentation_pred
-
-
+        return multi_label_pred
 
 if __name__ == "__main__":
     RESNet = models.resnet50(pretrained=True)
