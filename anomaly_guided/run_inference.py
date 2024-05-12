@@ -61,32 +61,18 @@ class Inference(Train):
             gt_list += gt_res
             cam_list += pred_res
         print(len(cam_list))
-        # import pdb; pdb.set_trace()
-        res_dic, auc_dic = calculate_classification_infer(cls_sig_pred, cl_gt)
-        import pdb; pdb.set_trace()
+        # res_dic, auc_dic = calculate_classification_infer(cls_sig_pred, cl_gt)
         score = scores(gt_list, cam_list, n_class=get_num_classes() + 1)
         print(score)
         record_score(score, 'resc')
         dice_score = Dice(gt_list, cam_list, n_class=get_num_classes() + 1)
         print(dice_score)
-        # score_sd = 0
-        # ccc = 0
-        # from medpy.metric.binary import assd
-        # for g, p in zip(gt_list, cam_list):
-        #     try:
-        #         score_sd += assd(g, p)
-        #         ccc += 1
-        #     except:
-        #         # import pdb; pdb.set_trace()
-        #         continue
-        # print('assd score: ', score_sd/ccc, ccc)
         return len(dataloader)
     
     def prepare_pesudo_label_for_seg(self):
         # RESC: 3093 for train + 388 for valid = 3481
         # DUKE: 7235 for train + 78 for valid
         # NYU: 3962 for train + 99 for valid (only 99 have overlap between human)
-        # import pdb; pdb.set_trace()
         self.args.continue_train = True
         if 'our_dataset' in self.args.root_dirs:
             infer_dataset = OCTDataset(self.args, data_type='train', is_generate_pseudo_label=True)
@@ -125,7 +111,6 @@ class Inference(Train):
             gt_list += gt_res
             cam_list += pred_res
         # print(len(cam_list))
-        import pdb; pdb.set_trace()
         # score = scores(gt_list, cam_list, n_class=get_num_classes() + 1)
         # print(score)
         # record_score(score, 'resc')
@@ -139,12 +124,6 @@ if __name__ == "__main__":
     start = time.time()
     # num_examples = validator.prepare_pesudo_label_for_seg()
     # num_examples =validator.inference(infer_list=['sn21294_59.bmp'])
-    num_examples =validator.inference()
+    num_examples =validator.inference(infer_list=["DME-4240465-16.jpeg"])
     end = time.time() - start
     print('total time: ', end, 'Avg: ', end/num_examples)
-
-
-    # validator.inference(infer_list=['DME-15307-1.jpeg',
-    #                               'DME-4240465-41.jpeg', 
-    #                               'DR10.jpeg',
-    #                               'NORMAL-15307-1.jpeg'])

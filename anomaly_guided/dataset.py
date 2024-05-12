@@ -2,7 +2,7 @@ import glob
 import numpy as np
 from PIL import Image, ImageEnhance
 from torch.utils.data import Dataset
-from torchvision import transforms
+from torchvision import transforms as T
 from utils.utils import OrgLabels, convert_resc_labels, get_mask_path_by_image_path
 import torch
 import pandas as pd
@@ -17,17 +17,17 @@ logging.getLogger('PIL').setLevel(logging.WARNING)
 
 def img_transform(img, mask, is_size, data_type, is_seg=False, healthy_v=None):
     # to PIL
-    to_pil = transforms.ToPILImage()
+    to_pil = T.ToPILImage()
     img, mask = to_pil(img), to_pil(mask)
     
     # Resize 
-    resize_img = transforms.Resize(is_size)
-    resize_mask = transforms.Resize(is_size, interpolation=Image.NEAREST)
+    resize_img = T.Resize(is_size)
+    resize_mask = T.Resize(is_size, interpolation=T.InterpolationMode.NEAREST)
     img, mask = resize_img(img), resize_mask(mask)
     
     if data_type == 'train':
         # Random color for image
-        color_jitter = transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)
+        color_jitter = T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1)
         img = color_jitter(img)
 
         # Random flip
@@ -35,14 +35,14 @@ def img_transform(img, mask, is_size, data_type, is_seg=False, healthy_v=None):
             img, mask = TF.hflip(img), TF.hflip(mask)
         
         # Random rotate
-        rotate = transforms.RandomRotation(degrees=60)
+        rotate = T.RandomRotation(degrees=60)
         state = torch.get_rng_state()
         img = rotate(img)
         torch.set_rng_state(state)
         mask = rotate(mask)
 
     # to tensor
-    to_tensor = transforms.ToTensor()
+    to_tensor = T.ToTensor()
     if not is_seg:
         mask = to_tensor(mask)
     else:
@@ -52,13 +52,13 @@ def img_transform(img, mask, is_size, data_type, is_seg=False, healthy_v=None):
     return img, mask
 
 def gan_normalize_transform(img, is_size):
-    to_pil = transforms.ToPILImage()
+    to_pil = T.ToPILImage()
     img = to_pil(img)
-    resize_img = transforms.Resize(is_size)
+    resize_img = T.Resize(is_size)
     img = resize_img(img)
-    to_tensor = transforms.ToTensor()
+    to_tensor = T.ToTensor()
     img = to_tensor(img)
-    transform_norml = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    transform_norml = T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     img = transform_norml(img)
     return img
 

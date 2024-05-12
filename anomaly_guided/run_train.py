@@ -17,7 +17,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = DEVICE_NR
 
 from gan_inference import load_gan_model
 from dataset import DukeDataset, OCTDataset, RESCDataset
-from refine_pseudo_label import refine_input_by_cam, get_pseudo_label
+from refine_pseudo_label import refine_input_by_cam
 from network.agm import AGM
 from network.single_models import CNNs
 

@@ -336,7 +336,8 @@ if __name__ == '__main__':
             # l.append({'BG': score["Class IoU"][0], 'SRF': score["Class IoU"][1], 'IRF': score["Class IoU"][2], 'EZ': score["Class IoU"][3], 'HRD': score["Class IoU"][4], 'mIoU': score['Mean IoU']})
             print('%d/60 background score: %.3f\tmIoU: %.3f%% \n'%(i, t, score['Mean IoU']))
 
-            print(Dice(gt_list, pred_list, n_class=len(categories)))
+            dice_score = Dice(gt_list, pred_list, n_class=len(categories))
+            print(dice_score)
             thres.append({
                 'threshold': t,
                 'baseline': 'DFP',
@@ -346,75 +347,8 @@ if __name__ == '__main__':
                 'Background': score['Class IoU'][0],
                 'miou': score['Mean IoU']
             })
+            print('%d/60 background score: %.3f\tmIoU: %.3f%%'%(i, t, score['Mean IoU']))
+            print('%d/60 background score: %.3f\tmDice: %.3f%%'%(i, t, dice_score['Macro Mean Dice']))
         thres=pd.DataFrame(thres)
         thres.to_csv('/scr2/xhu/jiaqi/wsss/baseline_models/supplementary/dfp_resc_scores.csv')
         import pdb; pdb.set_trace()
-
-    # python metrics.py  --type npy --curve True
-    parser = argparse.ArgumentParser()
-    # parser.add_argument("--list", default='abl_backbone_maps/resc_mnasnet/*', type=str) #duke_cam
-    # parser.add_argument("--list", default='baseline_models/WSMIS/irn/result/cam/*', type=str)
-    # parser.add_argument("--list", default='paper/thresh/resc/*', type=str)
-    parser.add_argument("--list", default='datasets/our_dataset/annotation_v2/*_meera.png', type=str) #duke_cam
-    parser.add_argument("--predict_dir", default='datasets/our_dataset/annotation_v2/', type=str)
-    # parser.add_argument("--predict_dir", default='baseline_models/WSMIS/irn/result/cam', type=str)
-    parser.add_argument("--gt_dir", default='datasets/our_dataset/annotation_v2', type=str)
-    # parser.add_argument("--gt_dir", default='datasets/RESC/valid/label_images', type=str)
-    # parser.add_argument("--gt_dir", default='datasets/2015_BOE_Chiu/segment_annotation/labels', type=str)
-    
-    parser.add_argument('--type', default='png', choices=['npy', 'png'], type=str)
-    # parser.add_argument('--type', default='npy', choices=['npy', 'png'], type=str)
-    
-    parser.add_argument('--t', default=0.6, type=float) # 0.3 is the highest mIoU by curve
-    parser.add_argument('--curve', default=True, type=bool)
-    parser.add_argument('--log_dir', default='resc_train_curve', type=str)
-    args = parser.parse_args()
-
-    if args.type == 'npy':
-        assert args.t is not None or args.curve
-    # df = pd.read_csv(args.list, names=['filename'])
-    name_list = [pth.split('/')[-1].split('.')[0] for pth in glob.glob(args.list)] #df['filename'].values
-    # import pdb; pdb.set_trace()
-    print('Disease size: ', len(name_list))
-    if not args.curve:
-        pred_list, gt_list = do_python_eval(args.predict_dir, args.gt_dir, name_list, args.type, args.t)
-        score = scores(gt_list, pred_list, n_class=len(categories))
-        print(score)
-        # record_score(score, args.log_dir)
-    else:
-        l = []
-        thres = []
-        for i in range(60, 61, 1):
-            t = i/100.0
-            pred_list, gt_list = do_python_eval(args.predict_dir, args.gt_dir, name_list, args.type, t)
-            # import pdb; pdb.set_trace()
-            # score_sd = 0
-            # ccc = 0
-            # for g, p in zip(gt_list, pred_list):
-            #     try:
-            #         score_sd += assd_score(g, p, n_class=len(categories))
-            #         ccc += 1
-            #     except:
-            #         # import pdb; pdb.set_trace()
-            #         continue
-            # print('assd score: ', score_sd/ccc, ccc)
-
-            score = scores(gt_list, pred_list, n_class=len(categories))
-            print(score)
-            dice_score = Dice(pred_list, gt_list, n_class=len(categories))
-            print(dice_score)
-            # record_score(score, args.log_dir)
-            l.append(score['Mean IoU'])
-            # thres.append({
-            #     'threshold': t,
-            #     'baseline': 'SEAM',
-            #     'dataset': 'RESC',
-            #     'SRF': score['Class IoU'][1],
-            #     'PED': score['Class IoU'][2],
-            #     'Background': score['Class IoU'][0],
-            #     'miou': score['Mean IoU']
-            # })
-            print('%d/60 background score: %.3f\tmIoU: %.3f%%'%(i, t, score['Mean IoU']))
-            print('%d/60 background score: %.3f\tmDice: %.3f%%'%(i, t, dice_score['Macro Mean Dice']))
-        # thres=pd.DataFrame(thres)
-        # thres.to_csv('paper/thresh/resc/seam_scores.csv')
