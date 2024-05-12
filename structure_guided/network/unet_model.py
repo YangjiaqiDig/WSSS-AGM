@@ -5,13 +5,15 @@ import numpy as np
 
 
 def normalize_cam(cams_tensor):
-    norm_cams = cams_tensor.detach().cpu().numpy() # [batch, class, h, w]
+    norm_cams = cams_tensor.detach().cpu().numpy()  # [batch, class, h, w]
     cam_max = np.max(norm_cams, (2, 3), keepdims=True)
     cam_min = np.min(norm_cams, (2, 3), keepdims=True)
     # norm_cams[norm_cams < cam_min + 1e-5] = 0
-    
+
     norm_cams = (norm_cams - cam_min) / (cam_max - cam_min + 1e-7)
     return torch.tensor(norm_cams).to(cams_tensor.device)
+
+
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
@@ -25,7 +27,7 @@ class DoubleConv(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
@@ -38,8 +40,7 @@ class Down(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2),
-            DoubleConv(in_channels, out_channels)
+            nn.MaxPool2d(2), DoubleConv(in_channels, out_channels)
         )
 
     def forward(self, x):
@@ -54,10 +55,12 @@ class Up(nn.Module):
 
         # if bilinear, use the normal convolutions to reduce the number of channels
         if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
             self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
         else:
-            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+            self.up = nn.ConvTranspose2d(
+                in_channels, in_channels // 2, kernel_size=2, stride=2
+            )
             self.conv = DoubleConv(in_channels, out_channels)
 
     def forward(self, x1, x2):
@@ -66,8 +69,7 @@ class Up(nn.Module):
         diffY = x2.size()[2] - x1.size()[2]
         diffX = x2.size()[3] - x1.size()[3]
 
-        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
-                        diffY // 2, diffY - diffY // 2])
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2])
         # if you have padding issues, see
         # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
         # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
@@ -83,49 +85,62 @@ class OutConv(nn.Module):
     def forward(self, x):
         return self.conv(x)
 
+
 class UNetWeakly(nn.Module):
-    def __init__(self, n_classes, n_classes_layer=2, n_channels=3, bilinear=False, is_size=(224, 224)):
+    def __init__(
+        self,
+        n_classes,
+        n_classes_layer=2,
+        n_channels=3,
+        n_layer_channels=3,
+        bilinear=False,
+        is_size=(224, 224),
+        include_seg_cls=False,
+    ):
         super(UNetWeakly, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.n_classes_layer = n_classes_layer
         self.bilinear = bilinear
         self.is_size = is_size
+        self.include_seg_cls = include_seg_cls
         factor = 2 if bilinear else 1
         self.feature_maps = {}
 
-        self.inc_orig = (DoubleConv(n_channels, 64))
-        self.down1_orig = (Down(64, 128))
-        self.down2_orig = (Down(128, 256))
-        self.down3_orig = (Down(256, 512))
-        self.down4_orig = (Down(512, 1024 // factor))
+        self.inc_orig = DoubleConv(n_channels, 64)
+        self.down1_orig = Down(64, 128)
+        self.down2_orig = Down(128, 256)
+        self.down3_orig = Down(256, 512)
+        self.down4_orig = Down(512, 1024 // factor)
 
-        self.inc_layer = (DoubleConv(3, 64)) # might need change for layers (binarilized better?)
-        self.down1_layer = (Down(64, 128))
-        self.down2_layer = (Down(128, 256))
-        self.down3_layer = (Down(256, 512))
-        self.down4_layer = (Down(512, 1024 // factor))
+        self.inc_layer = DoubleConv(
+            n_layer_channels, 64
+        )  # might need change for layers (binarilized better?)
+        self.down1_layer = Down(64, 128)
+        self.down2_layer = Down(128, 256)
+        self.down3_layer = Down(256, 512)
+        self.down4_layer = Down(512, 1024 // factor)
 
-        self.cls_orig = (OutConv(1024, n_classes))
-        self.cls_layer = (OutConv(1024, n_classes_layer))
+        self.cls_orig = OutConv(1024, n_classes)
+        self.cls_layer = OutConv(1024, n_classes_layer)
 
-        self.up1 = (Up(1024, 512 // factor, bilinear))
-        self.up2 = (Up(512, 256 // factor, bilinear))
-        self.up3 = (Up(256, 128 // factor, bilinear))
-        self.up4 = (Up(128, 64, bilinear))
+        self.up1 = Up(1024, 512 // factor, bilinear)
+        self.up2 = Up(512, 256 // factor, bilinear)
+        self.up3 = Up(256, 128 // factor, bilinear)
+        self.up4 = Up(128, 64, bilinear)
 
         # self.up1 = (Up(2048, 1024 // factor, bilinear))
         # self.up2 = (Up(1024, 512 // factor, bilinear))
         # self.up3 = (Up(512, 256 // factor, bilinear))
         # self.up4 = (Up(256, 128, bilinear))
 
-        self.outc = (OutConv(64, n_classes))
+        self.outc = OutConv(64, n_classes)
         # self.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
         self.maxpool = nn.AdaptiveMaxPool2d(output_size=(1, 1))
-    
+
     def cls_head_orig(self, feature):
-        y = self.cls_orig(feature) # x [b, 1024, 16, 16], y [b, n_cls, 16, 16]
-        orig_cams = F.conv2d(feature, self.cls_orig.conv.weight) # [b, n_cls, 16, 16]
+        y = self.cls_orig(feature)  # x [b, 1024, 16, 16], y [b, n_cls, 16, 16]
+        orig_cams = F.conv2d(feature, self.cls_orig.conv.weight)  # [b, n_cls, 16, 16]
         orig_cams = F.relu(orig_cams)
         y = self.maxpool(y)
         return y.view(y.size(0), -1), orig_cams
@@ -136,7 +151,7 @@ class UNetWeakly(nn.Module):
         layer_cams = F.relu(layer_cams)
         y = self.maxpool(y)
         return y.view(y.size(0), -1), layer_cams
-    
+
     def encoder(self, x, is_layer):
         if is_layer:
             x1 = self.inc_layer(x)
@@ -152,7 +167,7 @@ class UNetWeakly(nn.Module):
             x5 = self.down4_orig(x4)
 
         return [x1, x2, x3, x4, x5]
-    
+
     def decoder(self, comb_f_out):
         x1, x2, x3, x4, x5 = comb_f_out
 
@@ -163,9 +178,16 @@ class UNetWeakly(nn.Module):
         up_y = self.outc(up_y)
         return up_y
 
+    def get_cam_target_layers(self, type):
+        if type == "x":
+            cams = [self.down4_orig.maxpool_conv[-1]]
+        elif type == "y":
+            cams = [self.down4_layer]
+        return cams
+
     def forward(self, input_data):
-        orig_input = input_data[0]
-        layer_input = input_data[1]
+        orig_input = input_data[:, :3, :, :]
+        layer_input = input_data[:, 3:6, :, :]
         orig_f_out = self.encoder(orig_input, is_layer=False)
         layer_f_out = self.encoder(layer_input, is_layer=True)
 
@@ -176,39 +198,81 @@ class UNetWeakly(nn.Module):
         layer_cls_res, layer_cams = self.cls_head_layer(layer_feature)
         comb_cam = self.uncertainty_map(orig_cams, layer_cams)
 
-        comb_f_out = [o * l for o, l in zip(orig_f_out, layer_f_out)]  # element-wise addition
+        comb_f_out = [
+            o * l for o, l in zip(orig_f_out, layer_f_out)
+        ]  # element-wise addition
         # comb_f_out = [torch.cat((o, l), dim=1) for o, l in zip(orig_f_out, layer_f_out)]  # concatenate along channel axis
         seg_res = self.decoder(comb_f_out)
-        seg_class_pred = self.maxpool(seg_res)
-        seg_class_pred = seg_class_pred.view(seg_class_pred.size(0), -1)
-        # seg_class_pred = None
+        if self.include_seg_cls:
+            seg_cls_pred = self.maxpool(seg_res)
+            seg_cls_pred = seg_cls_pred.view(seg_cls_pred.size(0), -1)
+        else:
+            seg_cls_pred = None
 
-        return orig_cls_res, layer_cls_res, seg_res, comb_cam, seg_class_pred
-    
+        return [orig_cls_res], [layer_cls_res], seg_res, comb_cam, seg_cls_pred
+
     def uncertainty_map(self, orig_CAM, layer_CAM):
         # orig_CAM: [b, n_classes, w, h]
         # layer_CAM: [b, 2, w, h]
 
         # Compute certainty for layer_CAM (take the second class, i.e., presence of a lesion)
         layer_prob = F.softmax(layer_CAM, dim=1)
-        lesion_layer_certainty = layer_prob[:, 1:, :, :] # confidence of lesion, higher value lower certainty
-        layer_certainty = lesion_layer_certainty.repeat(1, self.n_classes-1, 1, 1)
+        lesion_layer_certainty = layer_prob[
+            :, 1:, :, :
+        ]  # confidence of lesion, higher value lower certainty
+        layer_certainty = lesion_layer_certainty.repeat(1, self.n_classes - 1, 1, 1)
 
+        # CAMs are not probabilistic outputs but rather raw activation intensities that highlight the regions of interest for each class.
+        # so better to use the raw activation intensities instead of softmax
+        # however was having too strong 0, which might be misleading with multiplication, so we try it with addition
         # lesion_layer_certainty = normalize_cam(layer_CAM)
-        # layer_certainty = lesion_layer_certainty[:, 1:, :, :].repeat(1, self.n_classes-1, 1, 1)
+        # layer_certainty = lesion_layer_certainty[:, 1:, :, :].repeat(
+        #     1, self.n_classes - 1, 1, 1
+        # )
         # import pdb; pdb.set_trace()
 
         # Compute weighted CAMs
-        weighted_CAMs = orig_CAM[:,1:] * layer_certainty # [b, n_classes-1, w, h], not include background-0
-        rescaled_CAMs = F.interpolate(weighted_CAMs.detach(), size=self.is_size, mode='bilinear', align_corners=False)
-        rescaled_layer_cam = F.interpolate(lesion_layer_certainty.detach(), size=self.is_size, mode='bilinear', align_corners=False)
-        rescaled_orig_cam = F.interpolate(orig_CAM.detach()[:,1:], size=self.is_size, mode='bilinear', align_corners=False)
+        weighted_CAMs = (
+            orig_CAM[:, 1:]
+            * layer_certainty
+            # orig_CAM[:, 1:]
+            # + layer_certainty
+        )  # [b, n_classes-1, w, h], not include background-0
+        rescaled_CAMs = F.interpolate(
+            weighted_CAMs.detach(),
+            size=self.is_size,
+            mode="bilinear",
+            align_corners=False,
+        )
+        rescaled_layer_cam = F.interpolate(
+            lesion_layer_certainty.detach(),
+            size=self.is_size,
+            mode="bilinear",
+            align_corners=False,
+        )
+        rescaled_orig_cam = F.interpolate(
+            orig_CAM.detach()[:, 1:],
+            size=self.is_size,
+            mode="bilinear",
+            align_corners=False,
+        )
 
-        return {"final_cam": rescaled_CAMs, "layer_cam": rescaled_layer_cam, "orig_cam": rescaled_orig_cam}
-    
+        return {
+            "final_cam": rescaled_CAMs,
+            "layer_cam": rescaled_layer_cam,
+            "orig_cam": rescaled_orig_cam,
+        }
+
 
 class UNetWeaklyBranch1(nn.Module):
-    def __init__(self, n_classes, n_classes_layer=2, n_channels=3, bilinear=False, is_size=(224, 224)):
+    def __init__(
+        self,
+        n_classes,
+        n_classes_layer=2,
+        n_channels=3,
+        bilinear=False,
+        is_size=(224, 224),
+    ):
         super(UNetWeaklyBranch1, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
@@ -218,27 +282,26 @@ class UNetWeaklyBranch1(nn.Module):
         factor = 2 if bilinear else 1
         self.feature_maps = {}
 
-        self.inc_orig = (DoubleConv(n_channels, 64))
-        self.down1_orig = (Down(64, 128))
-        self.down2_orig = (Down(128, 256))
-        self.down3_orig = (Down(256, 512))
-        self.down4_orig = (Down(512, 1024 // factor))
+        self.inc_orig = DoubleConv(n_channels, 64)
+        self.down1_orig = Down(64, 128)
+        self.down2_orig = Down(128, 256)
+        self.down3_orig = Down(256, 512)
+        self.down4_orig = Down(512, 1024 // factor)
 
+        self.cls_orig = OutConv(1024, n_classes)
 
-        self.cls_orig = (OutConv(1024, n_classes))
+        self.up1 = Up(1024, 512 // factor, bilinear)
+        self.up2 = Up(512, 256 // factor, bilinear)
+        self.up3 = Up(256, 128 // factor, bilinear)
+        self.up4 = Up(128, 64, bilinear)
 
-        self.up1 = (Up(1024, 512 // factor, bilinear))
-        self.up2 = (Up(512, 256 // factor, bilinear))
-        self.up3 = (Up(256, 128 // factor, bilinear))
-        self.up4 = (Up(128, 64, bilinear))
-
-        self.outc = (OutConv(64, n_classes))
+        self.outc = OutConv(64, n_classes)
         self.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
         # self.maxpool = nn.AdaptiveMaxPool2d(output_size=(1, 1))
-    
+
     def cls_head_orig(self, feature):
-        y = self.cls_orig(feature) # x [b, 1024, 16, 16], y [b, n_cls, 16, 16]
-        orig_cams = F.conv2d(feature, self.cls_orig.conv.weight) # [b, n_cls, 16, 16]
+        y = self.cls_orig(feature)  # x [b, 1024, 16, 16], y [b, n_cls, 16, 16]
+        orig_cams = F.conv2d(feature, self.cls_orig.conv.weight)  # [b, n_cls, 16, 16]
         orig_cams = F.relu(orig_cams)
         y = self.avgpool(y)
         return y.view(y.size(0), -1), orig_cams
@@ -251,7 +314,7 @@ class UNetWeaklyBranch1(nn.Module):
         x5 = self.down4_orig(x4)
 
         return [x1, x2, x3, x4, x5]
-    
+
     def decoder(self, comb_f_out):
         x1, x2, x3, x4, x5 = comb_f_out
 
@@ -275,17 +338,34 @@ class UNetWeaklyBranch1(nn.Module):
         seg_class_pred = None
 
         return orig_cls_res, None, seg_res, comb_cam, seg_class_pred
-    
+
     def uncertainty_map(self, orig_CAM):
         # orig_CAM: [b, n_classes, w, h]
 
         # Compute weighted CAMs
-        rescaled_CAMs = F.interpolate(orig_CAM[:,1:].detach(), size=self.is_size, mode='bilinear', align_corners=False)
+        rescaled_CAMs = F.interpolate(
+            orig_CAM[:, 1:].detach(),
+            size=self.is_size,
+            mode="bilinear",
+            align_corners=False,
+        )
         # import pdb; pdb.set_trace()
-        return {"final_cam": rescaled_CAMs, "layer_cam": rescaled_CAMs, "orig_cam": rescaled_CAMs}
-    
+        return {
+            "final_cam": rescaled_CAMs,
+            "layer_cam": rescaled_CAMs,
+            "orig_cam": rescaled_CAMs,
+        }
+
+
 class UNetWeaklyBranch2(nn.Module):
-    def __init__(self, n_classes, n_classes_layer=2, n_channels=3, bilinear=False, is_size=(224, 224)):
+    def __init__(
+        self,
+        n_classes,
+        n_classes_layer=2,
+        n_channels=3,
+        bilinear=False,
+        is_size=(224, 224),
+    ):
         super(UNetWeaklyBranch2, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
@@ -295,20 +375,22 @@ class UNetWeaklyBranch2(nn.Module):
         factor = 2 if bilinear else 1
         self.feature_maps = {}
 
-        self.inc_layer = (DoubleConv(3, 64)) # might need change for layers (binarilized better?)
-        self.down1_layer = (Down(64, 128))
-        self.down2_layer = (Down(128, 256))
-        self.down3_layer = (Down(256, 512))
-        self.down4_layer = (Down(512, 1024 // factor))
+        self.inc_layer = DoubleConv(
+            3, 64
+        )  # might need change for layers (binarilized better?)
+        self.down1_layer = Down(64, 128)
+        self.down2_layer = Down(128, 256)
+        self.down3_layer = Down(256, 512)
+        self.down4_layer = Down(512, 1024 // factor)
 
-        self.cls_layer = (OutConv(1024, n_classes))
+        self.cls_layer = OutConv(1024, n_classes)
 
-        self.up1 = (Up(1024, 512 // factor, bilinear))
-        self.up2 = (Up(512, 256 // factor, bilinear))
-        self.up3 = (Up(256, 128 // factor, bilinear))
-        self.up4 = (Up(128, 64, bilinear))
+        self.up1 = Up(1024, 512 // factor, bilinear)
+        self.up2 = Up(512, 256 // factor, bilinear)
+        self.up3 = Up(256, 128 // factor, bilinear)
+        self.up4 = Up(128, 64, bilinear)
 
-        self.outc = (OutConv(64, n_classes))
+        self.outc = OutConv(64, n_classes)
         self.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
         # self.maxpool = nn.AdaptiveMaxPool2d(output_size=(1, 1))
 
@@ -318,7 +400,7 @@ class UNetWeaklyBranch2(nn.Module):
         layer_cams = F.relu(layer_cams)
         y = self.avgpool(y)
         return y.view(y.size(0), -1), layer_cams
-    
+
     def encoder(self, x):
         x1 = self.inc_layer(x)
         x2 = self.down1_layer(x1)
@@ -327,7 +409,7 @@ class UNetWeaklyBranch2(nn.Module):
         x5 = self.down4_layer(x4)
 
         return [x1, x2, x3, x4, x5]
-    
+
     def decoder(self, comb_f_out):
         x1, x2, x3, x4, x5 = comb_f_out
 
@@ -351,17 +433,34 @@ class UNetWeaklyBranch2(nn.Module):
         seg_class_pred = None
 
         return layer_cls_res, None, seg_res, comb_cam, seg_class_pred
-    
+
     def uncertainty_map(self, layer_CAM):
         # layer_CAM: [b, 2, w, h]
 
         # Compute certainty for layer_CAM (take the second class, i.e., presence of a lesion)
-        rescaled_CAMs = F.interpolate(layer_CAM[:,1:].detach(), size=self.is_size, mode='bilinear', align_corners=False)
+        rescaled_CAMs = F.interpolate(
+            layer_CAM[:, 1:].detach(),
+            size=self.is_size,
+            mode="bilinear",
+            align_corners=False,
+        )
         # import pdb; pdb.set_trace()
-        return {"final_cam": rescaled_CAMs, "layer_cam": rescaled_CAMs, "orig_cam": rescaled_CAMs}
-    
+        return {
+            "final_cam": rescaled_CAMs,
+            "layer_cam": rescaled_CAMs,
+            "orig_cam": rescaled_CAMs,
+        }
+
+
 class UNetWeaklyBranch2Binary(nn.Module):
-    def __init__(self, n_classes, n_classes_layer=2, n_channels=3, bilinear=False, is_size=(224, 224)):
+    def __init__(
+        self,
+        n_classes,
+        n_classes_layer=2,
+        n_channels=3,
+        bilinear=False,
+        is_size=(224, 224),
+    ):
         super(UNetWeaklyBranch2Binary, self).__init__()
         self.n_channels = n_channels
         self.n_classes_layer = n_classes_layer
@@ -370,20 +469,22 @@ class UNetWeaklyBranch2Binary(nn.Module):
         factor = 2 if bilinear else 1
         self.feature_maps = {}
 
-        self.inc_layer = (DoubleConv(3, 64)) # might need change for layers (binarilized better?)
-        self.down1_layer = (Down(64, 128))
-        self.down2_layer = (Down(128, 256))
-        self.down3_layer = (Down(256, 512))
-        self.down4_layer = (Down(512, 1024 // factor))
+        self.inc_layer = DoubleConv(
+            3, 64
+        )  # might need change for layers (binarilized better?)
+        self.down1_layer = Down(64, 128)
+        self.down2_layer = Down(128, 256)
+        self.down3_layer = Down(256, 512)
+        self.down4_layer = Down(512, 1024 // factor)
 
-        self.cls_layer = (OutConv(1024, n_classes_layer))
+        self.cls_layer = OutConv(1024, n_classes_layer)
 
-        self.up1 = (Up(1024, 512 // factor, bilinear))
-        self.up2 = (Up(512, 256 // factor, bilinear))
-        self.up3 = (Up(256, 128 // factor, bilinear))
-        self.up4 = (Up(128, 64, bilinear))
+        self.up1 = Up(1024, 512 // factor, bilinear)
+        self.up2 = Up(512, 256 // factor, bilinear)
+        self.up3 = Up(256, 128 // factor, bilinear)
+        self.up4 = Up(128, 64, bilinear)
 
-        self.outc = (OutConv(64, n_classes_layer))
+        self.outc = OutConv(64, n_classes_layer)
         self.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
         # self.maxpool = nn.AdaptiveMaxPool2d(output_size=(1, 1))
 
@@ -393,7 +494,7 @@ class UNetWeaklyBranch2Binary(nn.Module):
         layer_cams = F.relu(layer_cams)
         y = self.avgpool(y)
         return y.view(y.size(0), -1), layer_cams
-    
+
     def encoder(self, x):
         x1 = self.inc_layer(x)
         x2 = self.down1_layer(x1)
@@ -402,7 +503,7 @@ class UNetWeaklyBranch2Binary(nn.Module):
         x5 = self.down4_layer(x4)
 
         return [x1, x2, x3, x4, x5]
-    
+
     def decoder(self, comb_f_out):
         x1, x2, x3, x4, x5 = comb_f_out
 
@@ -426,20 +527,30 @@ class UNetWeaklyBranch2Binary(nn.Module):
         seg_class_pred = None
 
         return None, layer_cls_res, seg_res, comb_cam, seg_class_pred
-    
+
     def uncertainty_map(self, layer_CAM):
         # layer_CAM: [b, 2, w, h]
 
         # Compute certainty for layer_CAM (take the second class, i.e., presence of a lesion)
-        rescaled_CAMs = F.interpolate(layer_CAM[:,1:].detach(), size=self.is_size, mode='bilinear', align_corners=False)
+        rescaled_CAMs = F.interpolate(
+            layer_CAM[:, 1:].detach(),
+            size=self.is_size,
+            mode="bilinear",
+            align_corners=False,
+        )
         # import pdb; pdb.set_trace()
-        return {"final_cam": rescaled_CAMs, "layer_cam": rescaled_CAMs, "orig_cam": rescaled_CAMs}
-  
+        return {
+            "final_cam": rescaled_CAMs,
+            "layer_cam": rescaled_CAMs,
+            "orig_cam": rescaled_CAMs,
+        }
+
+
 if __name__ == "__main__":
+    height, width = 224, 224
     model = UNetWeakly(n_classes=3, n_channels=3, bilinear=False)
     # Generate random inputs
     batch_size = 4
-    height, width = 224, 224
     orig_input = torch.randn(batch_size, 3, height, width)
     layer_input = torch.randn(batch_size, 3, height, width)
     input_data = [orig_input, layer_input]
@@ -453,4 +564,9 @@ if __name__ == "__main__":
     if seg_class_pred is not None:
         print("Seg Class Pred Shape: ", seg_class_pred.shape)
     print("Segmentation Result Shape: ", seg_res.shape)
-    print("CAMs Shape: ", cams["final_cam"].shape, cams["layer_cam"].shape, cams["orig_cam"].shape)
+    print(
+        "CAMs Shape: ",
+        cams["final_cam"].shape,
+        cams["layer_cam"].shape,
+        cams["orig_cam"].shape,
+    )

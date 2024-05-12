@@ -143,7 +143,7 @@ def convert_resc_labels(img):
     img[img == 255] = 0
     img[img == 191] = 1
     img[img == 128] = 2
-    if len(OrgLabels) == 2:
+    if len(OrgLabels) == 2 and "BackGround" in OrgLabels:
         img[img == 2] = 1
     return img
 
@@ -180,37 +180,67 @@ def get_resc_train_annot(img_name):
     orig_annot = np.asarray(Image.open(annot_path))
     return convert_resc_labels(orig_annot)
 
+
 def normalize_cam(cams_tensor):
-    norm_cams = cams_tensor.detach().cpu().numpy() # [batch, class, h, w]
+    norm_cams = cams_tensor.detach().cpu().numpy()  # [batch, class, h, w]
     cam_max = np.max(norm_cams, (2, 3), keepdims=True)
     cam_min = np.min(norm_cams, (2, 3), keepdims=True)
     # norm_cams[norm_cams < cam_min + 1e-5] = 0
-    
+
     norm_cams = (norm_cams - cam_min) / (cam_max - cam_min + 1e-7)
     return norm_cams
 
 
-def post_process_cam(cams_tensor, labels, bg_score=0.7):
-    norm_cams = normalize_cam(cams_tensor)
-    label_masks = labels[:,1:].unsqueeze(2).unsqueeze(3).detach().cpu().numpy()
-    masked_cams = norm_cams * label_masks # only keep the cam of the gt class
+def normalize_cam_tensor(cams_tensor):
+    norm_cams = cams_tensor.detach().cpu()  # [batch, class, h, w]
+    cam_max = torch.amax(norm_cams, (2, 3), keepdim=True)
+    cam_min = torch.amin(norm_cams, (2, 3), keepdim=True)
 
-    bg_cam = np.ones((norm_cams.shape[0], 1, norm_cams.shape[2], norm_cams.shape[3])) * bg_score
+    norm_cams = (norm_cams - cam_min) / (cam_max - cam_min + 1e-7)
+    return norm_cams
+
+
+def get_target_cams(cams_tensor, labels):
+    norm_cams = normalize_cam(cams_tensor)
+    label_masks = labels[:, 1:].unsqueeze(2).unsqueeze(3).detach().cpu().numpy()
+    masked_cams = norm_cams * label_masks  # only keep the cam of the gt class
+    return masked_cams
+
+
+def get_target_cams_tensor(k, cams_tensor, labels, binary_labels):
+    if "BackGround" in OrgLabels:
+        updated_labels = labels[:, 1:]
+    else:
+        updated_labels = labels
+    if "layer" in k:
+        updated_labels = F.one_hot(binary_labels, num_classes=2)[:, 1:]
+    norm_cams = normalize_cam_tensor(cams_tensor)
+    label_masks = updated_labels.unsqueeze(2).unsqueeze(3).detach().cpu()
+    masked_cams = norm_cams * label_masks  # only keep the cam of the gt class
+    return masked_cams
+
+
+def post_process_cam(cams_tensor, labels, bg_score=0.7):
+    masked_cams = get_target_cams(cams_tensor, labels)
+    bg_cam = (
+        np.ones((cams_tensor.shape[0], 1, cams_tensor.shape[2], cams_tensor.shape[3]))
+        * bg_score
+    )
     cams_with_bg_score = torch.tensor(np.concatenate((bg_cam, masked_cams), axis=1))
     pred_cam_labels = torch.argmax(cams_with_bg_score, axis=1)
     return cams_with_bg_score, pred_cam_labels
 
-def get_cam_and_save(seg_preds, cam_preds, input_data, opts, epoch, orig_cams, layer_cams):
-    is_seg_round = opts.seg_start_epoch<=epoch
+
+def get_cam_and_save(
+    cam_preds, input_data, opts, epoch, orig_cams, layer_cams
+):
     binary_labels = input_data["binary_labels"]
     labels = input_data["labels"]
-    if len(labels[0]) != len(seg_preds[0]):
-        labels = F.one_hot(binary_labels, num_classes=2) # layer binary prediction
     path = input_data["path"]
     # batch_preds [BC] B: batch, C: Class
-    ready_seg, ready_cam_pred = [], []
+    ready_cam_pred = []
     gt = []
-    for batch_nb, (seg_pred, cam_pred) in enumerate(zip(seg_preds, cam_preds)):
+    for batch_nb, cam_pred in enumerate(cam_preds):
         # only calculate and save for ground truth lesion images
         if binary_labels[batch_nb] == 0:
             continue
@@ -221,68 +251,46 @@ def get_cam_and_save(seg_preds, cam_preds, input_data, opts, epoch, orig_cams, l
         if len(orig_img.shape) == 3:
             orig_img = orig_img[..., 0]
 
-        if "our_dataset" in opts.root_dirs:
-            if opts.expert_annot == "both":
-                annot_path = os.path.join(
-                    opts.root_dirs, opts.annot_dir, img_name.split(".")[0] + ".png"
-                )
-            else:
-                expert_annot_img_name = (
-                    img_name.split(".")[0] + f"_{opts.expert_annot}.png"
-                )
-                annot_path = os.path.join(
-                    opts.root_dirs, opts.annot_dir, expert_annot_img_name
-                )
-        else:
-            annot_path = os.path.join(
-                opts.root_dirs, opts.annot_dir, img_name
-            )  # resc valid/label_images
-        orig_annot = np.asarray(Image.open(annot_path))
-        truth_label = [OrgLabels[idx] for idx, l in enumerate(labels[batch_nb]) if l != 0 and OrgLabels[idx] != "BackGround"]
+        orig_annot = get_annot_by_dataset(opts, img_name)
+        truth_label = [
+            OrgLabels[idx]
+            for idx, l in enumerate(labels[batch_nb])
+            if l != 0 and OrgLabels[idx] != "BackGround"
+        ]
         truth_label = "_".join(truth_label)
-        
+
         resize_cam = F.interpolate(
             cam_pred.clone().unsqueeze(0),  # [1, cls, w, h]
             size=(orig_img.shape[0], orig_img.shape[1]),
             mode="bilinear",
-            align_corners=False,
-        ).squeeze(0)  
-        ready_cam_pred.append(resize_cam.argmax(0).detach().cpu().numpy())
-        final_prob_map = resize_cam.clone()
+            align_corners=True,
+        ).squeeze(0)
 
-        if is_seg_round:
-            seg_prob_map = F.softmax(seg_pred.clone(), dim=0)  # log_softmax?
-            resized_seg = F.interpolate(
-                seg_prob_map.unsqueeze(0),  # [1, cls, w, h]
-                size=(orig_img.shape[0], orig_img.shape[1]),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0)
-            ready_seg.append(resized_seg.argmax(0).detach().cpu().numpy())
-            final_prob_map = resized_seg.clone()
+        binarized_seg = resize_cam.argmax(0)
+        ready_cam_pred.append(binarized_seg.detach().cpu().numpy())
 
-        
-        binarized_seg = final_prob_map.argmax(0)        
         gt_labels = convert_data_labels(orig_annot, opts.root_dirs)
-
-        gt.append(gt_labels)        
+        gt.append(gt_labels)
 
         if not opts.save_results:
             continue
-        
+
         orig_cam = orig_cams[batch_nb]
         layer_cam = layer_cams[batch_nb]
-        
-        save_cam_in_row = [input_data["image"][batch_nb][0]]
+
+        save_cam_in_row = [input_data["image"][batch_nb][0]]  # orig
         # import pdb; pdb.set_trace()
         for i, name in enumerate(OrgLabels):
             if name == "BackGround" or labels[batch_nb][i] == 0:
                 continue
-            save_cam_in_row.append(cam_pred[i].cpu())
-            if is_seg_round:
-                save_cam_in_row.append(seg_prob_map[i].cpu())
-            save_cam_in_row.append(torch.tensor(orig_cam[i-1])) # background is 0, but we dont have background cam
-        save_cam_in_row.append(torch.tensor(layer_cam[0])) # we only have 1 layer of lesion cam
+            save_cam_in_row.append(cam_pred[i].cpu())  # comb_cam
+            save_cam_in_row.append(
+                torch.tensor(orig_cam[i - 1])
+            )  # background is 0, but we dont have background cam
+        # save_cam_in_row.append(
+        #     torch.tensor(layer_cam[0])
+        # )  # we only have 1 layer of lesion cam
+        # import pdb; pdb.set_trace()
         save_cam_in_row = torch.stack(save_cam_in_row).unsqueeze(1)
 
         save_seg = (
@@ -293,15 +301,15 @@ def get_cam_and_save(seg_preds, cam_preds, input_data, opts, epoch, orig_cams, l
             .numpy()
         )
         save_seg = np.uint8(save_seg * 255)
-        layer_seg_result = input_data["layer_mask"][batch_nb]
+        layer_seg_result = input_data["layer_prob"][batch_nb]
         resized_layer = F.interpolate(
             layer_seg_result.unsqueeze(0),  # [1, cls, w, h]
             size=(orig_img.shape[0], orig_img.shape[1]),
             mode="bilinear",
-            align_corners=False,
-        ).squeeze(0) 
+            align_corners=True,
+        ).squeeze(0)
         resized_layer = resized_layer.argmax(0).detach().cpu().numpy()
-        resized_layer = np.uint8(resized_layer / 11 * 255)
+        resized_layer = np.uint8(resized_layer / resized_layer.max() * 255)
 
         save_img = [orig_img, orig_annot, save_seg, resized_layer]
         save_image_h = cv2.hconcat(save_img)
@@ -311,12 +319,72 @@ def get_cam_and_save(seg_preds, cam_preds, input_data, opts, epoch, orig_cams, l
         )
         if not os.path.exists(save_path):
             os.makedirs(save_path)
-        is_seg_ext = "seg" if is_seg_round else "cam"
+        is_seg_ext = "cam"
         cv2.imwrite(
-            save_path + "/epoch{}_{}_{}.jpg".format(epoch, truth_label, is_seg_ext), save_image_h
+            save_path + "/epoch{}_{}_{}.jpg".format(epoch, truth_label, is_seg_ext),
+            save_image_h,
         )
-        vutils.save_image(save_cam_in_row, save_path + "/epoch{}_{}_heatmaps.jpg".format(epoch, truth_label), scale_each=True, normalize=True)
-    return gt, ready_seg, ready_cam_pred
+        vutils.save_image(
+            save_cam_in_row,
+            save_path + "/epoch{}_{}_heatmaps.jpg".format(epoch, truth_label),
+            scale_each=True,
+            normalize=True,
+        )
+    return gt, ready_cam_pred
+
+def get_binarized_cam_pred(thres, t_name, cam_dict):
+    cam = cam_dict[t_name]
+    # cam: [cls, w, h] numpy
+    bg_score = np.ones((1, cam[0].shape[0], cam[0].shape[1])) * thres / 100
+    b_pred = np.argmax(np.concatenate((bg_score, cam), axis=0), axis=0).astype(np.uint8)
+    return b_pred
+
+def get_gt_and_relevant_cams(cams_dict, input_data, opts):
+    path = input_data["path"]
+    binary_labels = input_data["binary_labels"]
+    multi_labels = input_data["labels"]
+    # batch_preds [BC] B: batch, C: Class
+    cams_dict = {
+        k: get_target_cams_tensor(k, v, multi_labels, binary_labels) for k, v in cams_dict.items()
+    }
+
+    updated_cams_dicts = []
+    for batch_nb in range(len(binary_labels)):
+        # only calculate and save for ground truth lesion images
+        if binary_labels[batch_nb] == 0:
+            continue
+        img_name = path[batch_nb].split("/")[-1]
+        # 0-255 pixel value, numpy
+        orig_annot = get_annot_by_dataset(opts, img_name)
+        assert len(orig_annot.shape) == 2
+        original_size = (orig_annot.shape[0], orig_annot.shape[1])
+        gt_labels = convert_data_labels(orig_annot, opts.root_dirs)
+        updated_single_cam = {"img_name": img_name, "gt": gt_labels}
+        for k, v in cams_dict.items():
+            updated_single_cam[k] = (
+                F.interpolate(
+                    v[batch_nb].unsqueeze(0),  # [1, cls, w, h]
+                    size=original_size,
+                    mode="bilinear",
+                    align_corners=True,
+                )
+                .cpu()
+                .numpy()[0]
+            )
+        # updated_single_cam["final_cam"] = (
+        #     0.4 * updated_single_cam["clip-l3-relu-sim"]
+        #     + 0.6 * updated_single_cam["clip-l4-relu-sim"]
+        # )
+
+        updated_single_cam["final_cam"] = (
+            # 0.2 * updated_single_cam["clip-l3-relu-sim"]
+            + 0.5 * updated_single_cam["clip-l4-relu-sim"]
+            + 0.5 * updated_single_cam["main-relu-cam"]
+        )
+
+        updated_cams_dicts.append(updated_single_cam)
+
+    return updated_cams_dicts
 
 
 def save_models(
@@ -346,49 +414,26 @@ def save_models(
     )
 
 
-def save_tensorboard_val(tb, loss_dict, mark_epoch):
-    tb.add_scalar("Loss/Valid", loss_dict["total_val_loss"], mark_epoch + 1)
-    tb.add_scalar("ROC/Valid", loss_dict["total_val_roc"], mark_epoch + 1)
+def save_tensorboard(tb, loss_dict, mark_epoch, log_type):
+    acc_name = f"total_{log_type.lower()}_acc_matrix"
+    roc_name = f"total_{log_type.lower()}_roc_matrix"
+    tb.add_scalar("Loss/Train", loss_dict[acc_name]["loss"], mark_epoch + 1)
+    tb.add_scalar("ROC/Train", loss_dict[roc_name]["Avg"], mark_epoch + 1)
     for acc_type in ["acc", "f1m"]:
         tb.add_scalar(
-            "Val Accuracy/{}".format(acc_type),
-            loss_dict["total_val_acc_matrix"][acc_type],
+            f"{log_type} Accuracy/{acc_type}",
+            loss_dict[acc_name][acc_type],
             mark_epoch + 1,
         )
-    for label_type in OrgLabels:
+    for label_type in OrgLabels or "Layer" in label_type:
         tb.add_scalar(
-            "Val Class Acc/{}".format(label_type),
-            loss_dict["total_val_acc_matrix"][label_type],
+            f"{log_type} Class Acc/{label_type}",
+            loss_dict[acc_name][label_type],
             mark_epoch + 1,
         )
         tb.add_scalar(
-            "Val Class ROC/{}".format(label_type),
-            loss_dict["total_val_roc_matrix"][label_type],
+            f"{log_type} Class ROC/{label_type}",
+            loss_dict[roc_name][label_type],
             mark_epoch + 1,
         )
     tb.close()
-
-
-def save_tensorboard_train(tb, loss_dict, mark_epoch):
-    tb.add_scalar("Loss/Train", loss_dict["total_train_loss"], mark_epoch + 1)
-    tb.add_scalar("ROC/Train", loss_dict["total_train_roc"], mark_epoch + 1)
-    for acc_type in ["acc", "f1m"]:
-        tb.add_scalar(
-            "Train Accuracy/{}".format(acc_type),
-            loss_dict["total_train_acc_matrix"][acc_type],
-            mark_epoch + 1,
-        )
-    for label_type in OrgLabels:
-        tb.add_scalar(
-            "Train Class Acc/{}".format(label_type),
-            loss_dict["total_train_acc_matrix"][label_type],
-            mark_epoch + 1,
-        )
-        tb.add_scalar(
-            "Train Class ROC/{}".format(label_type),
-            loss_dict["total_train_roc_matrix"][label_type],
-            mark_epoch + 1,
-        )
-    tb.close()
-
-
