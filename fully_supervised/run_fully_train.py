@@ -1,10 +1,7 @@
 import os
 
-from gan_and_str.P_Net_Anomaly_Detection.networks.unet import UNet_4mp
-
-
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-DEVICE_NR = "1"
+DEVICE_NR = "6"
 os.environ["CUDA_VISIBLE_DEVICES"] = DEVICE_NR
 
 import time
@@ -12,7 +9,6 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import transforms
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
@@ -31,8 +27,7 @@ from utils.utils_full_seg import (
 )
 from options_seg import Configs
 from utils.metrics_full_seg import Dice, scores
-import torch.nn.functional as F
-import glob
+
 
 def dsc_loss(y_pred, y_true, varepsilon=1.0e-8):
     epsilon = 1.0e-8
@@ -64,7 +59,7 @@ class Train:
         # if "layer" in self.args.loss_type:
         #     self.model_G = UNet_4mp(n_channels=1, n_classes=12)
         #     self.model_G = nn.DataParallel(self.model_G).cuda()
-        #     ckpt_path = "/scr/xhu/jiaqi/gan_and_str/P_Net_Anomaly_Detection/str_models/oct_str_model.pth.tar"
+        #     ckpt_path = "/scr2/xhu/jiaqi/gan_and_str/P_Net_Anomaly_Detection/str_models/oct_str_model.pth.tar"
         #     if os.path.isfile(ckpt_path):
         #         print("=> loading checkpoint '{}'".format(ckpt_path))
         #         checkpoint = torch.load(ckpt_path)
@@ -307,38 +302,7 @@ class Train:
 
         print("final running time:", time.time() - start)
 
-def save_layer_seg_results():
-    from PIL import Image
-
-    model_G = UNet_4mp(n_channels=1, n_classes=12)
-    model_G = nn.DataParallel(model_G).cuda()
-    ckpt_path = "/scr/xhu/jiaqi/gan_and_str/P_Net_Anomaly_Detection/str_models/oct_str_model.pth.tar"
-    if os.path.isfile(ckpt_path):
-        print("=> loading checkpoint '{}'".format(ckpt_path))
-        checkpoint = torch.load(ckpt_path)
-        model_G.load_state_dict(checkpoint["state_dict_G"])
-        print(
-            "=> loaded checkpoint '{}' (epoch {})".format(
-                ckpt_path, checkpoint["epoch"]
-            )
-        )
-    model_G.eval()
-    resize_img = transforms.Resize((224,224))
-    to_tensor = transforms.ToTensor()
-    dirs = glob.glob("/scr/xhu/jiaqi/datasets/RESC/valid/original_images/*")
-    for dir in dirs:
-        img = Image.open(dir)
-        tensor = to_tensor(resize_img(img))[:1].unsqueeze(0)
-        tensor[tensor > 0.95] = 0
-        with torch.no_grad():
-            layer_mask = model_G(tensor)
-        pred_softmax = F.softmax(layer_mask, dim=1)
-        save_res = pred_softmax[0].cpu().numpy()
-        save_name = dir.split("/")[-1].split(".")[0] + ".npy"
-        np.save("/scr/xhu/jiaqi/datasets/RESC/valid/layer_masks/" + save_name, save_res)
-
 
 if __name__ == "__main__":
     trainer = Train()
     trainer.train()
-    # save_layer_seg_results()
