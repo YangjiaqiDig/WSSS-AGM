@@ -375,12 +375,14 @@ def get_gt_and_relevant_cams(cams_dict, input_data, opts):
         #     0.4 * updated_single_cam["clip-l3-relu-sim"]
         #     + 0.6 * updated_single_cam["clip-l4-relu-sim"]
         # )
-
-        updated_single_cam["final_cam"] = (
-            # 0.2 * updated_single_cam["clip-l3-relu-sim"]
-            + 0.5 * updated_single_cam["clip-l4-relu-sim"]
-            + 0.5 * updated_single_cam["main-relu-cam"]
-        )
+        if "clip-l4-relu-sim" not in updated_single_cam:
+            updated_single_cam["final_cam"] = updated_single_cam["main-relu-cam"]
+        else:
+            updated_single_cam["final_cam"] = (
+                0.3 * updated_single_cam["clip-l3-relu-sim"]
+                + 0.3 * updated_single_cam["clip-l4-relu-sim"]
+                + 0.4 * updated_single_cam["main-relu-cam"]
+            )
 
         updated_cams_dicts.append(updated_single_cam)
 
