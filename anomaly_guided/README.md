@@ -20,10 +20,62 @@ pip install opencv-python tqdm tensorboard cython
 pip install grad-cam
 ```
 
-## Preparing Datasets (coming soon)
-RESC 
+## Preparing Datasets
+1. The datasets, RESC and Duke, are used by all projects in this repo.
 
-Duke
+2. The datasets can be downloaded from this Google Drive [link](https://drive.google.com/drive/folders/1IdQUW4zpfnXRsq_8OWdEH90bWR8c9Cod?usp=sharing)
+
+3. The RESC and Duke are .tar.gz files which need to be extracted: ```tar -xzf datasets.tar.gz```. The structure of /your_dir/datasets/ should be organized as follows:
+```
+---2015_BOE_Chiu/
+       --segment_annotation
+            --gan_healthy
+            --images
+            --labels
+            --mask
+       --train.csv
+       --valid.csv
+
+---oct_kaggle/
+       --normal_mask
+       --origin
+            --test/DME
+            --train/DME
+       --test
+            --0.normal
+            --1.abnormal
+       --train
+            --0.normal
+            --gan_healthy
+
+---RESC/
+       --mask
+            --train
+            --valid
+       --train
+            --gan_healthy
+            --label_images
+            --original_images
+       --valid
+            --gan_healthy
+            --label_images
+            --original_images
+       --resc_cls_labels.npy
+```
+## Weights Download
+TBD
+## Training
+```
+python run_train.py
+```
+
+## Contact
+
+For further questions or details, please post an issue or directly reach out to Jiaqi Yang (jyang2@gradcenter.cuny.edu)
+
+## Acknowledgement
+We used [GANomaly](https://github.com/samet-akcay/ganomaly) to generate normal OCT images and used [pytorch_grad_cam](https://github.com/jacobgil/pytorch-grad-cam/tree/61e9babae8600351b02b6e90864e4807f44f2d4a) to generate GradCAM results. Thanks for their wonderful works.
+
 
 ## Citation
 If you find this project helpful for your research, please consider citing the following BibTeX entry.
