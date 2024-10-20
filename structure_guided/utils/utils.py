@@ -10,37 +10,7 @@ import torchvision.utils as vutils
 import torch.nn.functional as F
 from PIL import Image
 
-type_color = {
-    0: [0, 0, 0],  # black
-    1: [52, 195, 235],  # srf red
-    3: [0, 255, 0],  # irf green
-    2: [165, 235, 52],  # ez blue   235, 211, 52
-    4: [255, 255, 0],  # hrd yellow
-    5: [255, 165, 0],  # rpe orange
-    6: [255, 0, 255],  # back ground pink
-}
 OrgLabels = Configs().get_labels()  # ['BackGround', 'SRF', 'IRF', 'EZ', 'HRD',  'RPE']
-
-
-def get_mask_path_by_image_path(image_path):
-    if "BOE" in image_path:
-        mask_path = image_path.replace("/images/", "/mask/")
-    elif "RESC" in image_path:
-        mask_path = image_path.replace("/RESC/", "/RESC/mask/").replace(
-            "original_images/", ""
-        )
-    elif "NORMAL" in image_path:
-        mask_path = image_path.replace("train/0.normal", "normal_mask")
-    else:
-        mask_path = image_path.replace("original", "mask")
-    return mask_path
-
-
-def load_mask(image_path):
-    orig_mask = np.asarray(Image.open(get_mask_path_by_image_path(image_path)))[..., 0]
-    orig_mask[orig_mask > 150] = 255
-    orig_mask[orig_mask <= 150] = 0
-    return orig_mask
 
 
 def get_annot_by_dataset(opts, img_name):
@@ -60,30 +30,6 @@ def get_annot_by_dataset(opts, img_name):
         )  # resc valid/label_images
     orig_annot = np.asarray(Image.open(annot_path))
     return orig_annot
-
-
-def reshape_transform_vit(tensor, height=14, width=14):
-    result = tensor[:, 1:, :].reshape(tensor.size(0), height, width, tensor.size(2))
-    # Bring the channels to the first dimension,
-    # like in CNNs.
-    result = result.transpose(2, 3).transpose(1, 2)
-    return result
-
-
-def reshape_transform_swim(tensor, height=7, width=7):
-    result = tensor.reshape(tensor.size(0), height, width, tensor.size(2))
-    # Bring the channels to the first dimension,
-    # like in CNNs.
-    result = result.transpose(2, 3).transpose(1, 2)
-    return result
-
-
-def reshape_transform(tensor):
-    if tensor.shape[1] != 197 and tensor.shape[1] != 49:
-        return tensor
-    if tensor.shape[1] == 197:
-        return reshape_transform_vit(tensor)
-    return reshape_transform_swim(tensor)
 
 
 def get_num_lesions():
@@ -185,7 +131,6 @@ def normalize_cam(cams_tensor):
     norm_cams = cams_tensor.detach().cpu().numpy()  # [batch, class, h, w]
     cam_max = np.max(norm_cams, (2, 3), keepdims=True)
     cam_min = np.min(norm_cams, (2, 3), keepdims=True)
-    # norm_cams[norm_cams < cam_min + 1e-5] = 0
 
     norm_cams = (norm_cams - cam_min) / (cam_max - cam_min + 1e-7)
     return norm_cams
@@ -231,107 +176,6 @@ def post_process_cam(cams_tensor, labels, bg_score=0.7):
     return cams_with_bg_score, pred_cam_labels
 
 
-def get_cam_and_save(
-    cam_preds, input_data, opts, epoch, orig_cams, layer_cams
-):
-    binary_labels = input_data["binary_labels"]
-    labels = input_data["labels"]
-    path = input_data["path"]
-    # batch_preds [BC] B: batch, C: Class
-    ready_cam_pred = []
-    gt = []
-    for batch_nb, cam_pred in enumerate(cam_preds):
-        # only calculate and save for ground truth lesion images
-        if binary_labels[batch_nb] == 0:
-            continue
-        image_path = path[batch_nb]
-        img_name = image_path.split("/")[-1]
-        # 0-255 pixel value, numpy
-        orig_img = np.asarray(Image.open(image_path))
-        if len(orig_img.shape) == 3:
-            orig_img = orig_img[..., 0]
-
-        orig_annot = get_annot_by_dataset(opts, img_name)
-        truth_label = [
-            OrgLabels[idx]
-            for idx, l in enumerate(labels[batch_nb])
-            if l != 0 and OrgLabels[idx] != "BackGround"
-        ]
-        truth_label = "_".join(truth_label)
-
-        resize_cam = F.interpolate(
-            cam_pred.clone().unsqueeze(0),  # [1, cls, w, h]
-            size=(orig_img.shape[0], orig_img.shape[1]),
-            mode="bilinear",
-            align_corners=True,
-        ).squeeze(0)
-
-        binarized_seg = resize_cam.argmax(0)
-        ready_cam_pred.append(binarized_seg.detach().cpu().numpy())
-
-        gt_labels = convert_data_labels(orig_annot, opts.root_dirs)
-        gt.append(gt_labels)
-
-        if not opts.save_results:
-            continue
-
-        orig_cam = orig_cams[batch_nb]
-        layer_cam = layer_cams[batch_nb]
-
-        save_cam_in_row = [input_data["image"][batch_nb][0]]  # orig
-        # import pdb; pdb.set_trace()
-        for i, name in enumerate(OrgLabels):
-            if name == "BackGround" or labels[batch_nb][i] == 0:
-                continue
-            save_cam_in_row.append(cam_pred[i].cpu())  # comb_cam
-            save_cam_in_row.append(
-                torch.tensor(orig_cam[i - 1])
-            )  # background is 0, but we dont have background cam
-        # save_cam_in_row.append(
-        #     torch.tensor(layer_cam[0])
-        # )  # we only have 1 layer of lesion cam
-        # import pdb; pdb.set_trace()
-        save_cam_in_row = torch.stack(save_cam_in_row).unsqueeze(1)
-
-        save_seg = (
-            torch.clamp(binarized_seg / get_num_lesions(), 0, 1)
-            .squeeze()
-            .detach()
-            .cpu()
-            .numpy()
-        )
-        save_seg = np.uint8(save_seg * 255)
-        layer_seg_result = input_data["layer_prob"][batch_nb]
-        resized_layer = F.interpolate(
-            layer_seg_result.unsqueeze(0),  # [1, cls, w, h]
-            size=(orig_img.shape[0], orig_img.shape[1]),
-            mode="bilinear",
-            align_corners=True,
-        ).squeeze(0)
-        resized_layer = resized_layer.argmax(0).detach().cpu().numpy()
-        resized_layer = np.uint8(resized_layer / resized_layer.max() * 255)
-
-        save_img = [orig_img, orig_annot, save_seg, resized_layer]
-        save_image_h = cv2.hconcat(save_img)
-
-        save_path = os.path.join(
-            opts.save_folder, "images", "{}".format(img_name.split(".")[0])
-        )
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
-        is_seg_ext = "cam"
-        cv2.imwrite(
-            save_path + "/epoch{}_{}_{}.jpg".format(epoch, truth_label, is_seg_ext),
-            save_image_h,
-        )
-        vutils.save_image(
-            save_cam_in_row,
-            save_path + "/epoch{}_{}_heatmaps.jpg".format(epoch, truth_label),
-            scale_each=True,
-            normalize=True,
-        )
-    return gt, ready_cam_pred
-
 def get_binarized_cam_pred(thres, t_name, cam_dict):
     cam = cam_dict[t_name]
     # cam: [cls, w, h] numpy
@@ -339,15 +183,16 @@ def get_binarized_cam_pred(thres, t_name, cam_dict):
     b_pred = np.argmax(np.concatenate((bg_score, cam), axis=0), axis=0).astype(np.uint8)
     return b_pred
 
+
 def get_gt_and_relevant_cams(cams_dict, input_data, opts):
     path = input_data["path"]
     binary_labels = input_data["binary_labels"]
     multi_labels = input_data["labels"]
     # batch_preds [BC] B: batch, C: Class
     cams_dict = {
-        k: get_target_cams_tensor(k, v, multi_labels, binary_labels) for k, v in cams_dict.items()
+        k: get_target_cams_tensor(k, v, multi_labels, binary_labels)
+        for k, v in cams_dict.items()
     }
-
     updated_cams_dicts = []
     for batch_nb in range(len(binary_labels)):
         # only calculate and save for ground truth lesion images
@@ -356,6 +201,9 @@ def get_gt_and_relevant_cams(cams_dict, input_data, opts):
         img_name = path[batch_nb].split("/")[-1]
         # 0-255 pixel value, numpy
         orig_annot = get_annot_by_dataset(opts, img_name)
+        # import pdb; pdb.set_trace()
+        # orig_annot = np.asarray(Image.open(path[batch_nb]))
+        # import pdb; pdb.set_trace()
         assert len(orig_annot.shape) == 2
         original_size = (orig_annot.shape[0], orig_annot.shape[1])
         gt_labels = convert_data_labels(orig_annot, opts.root_dirs)
@@ -371,18 +219,30 @@ def get_gt_and_relevant_cams(cams_dict, input_data, opts):
                 .cpu()
                 .numpy()[0]
             )
-        # updated_single_cam["final_cam"] = (
-        #     0.4 * updated_single_cam["clip-l3-relu-sim"]
-        #     + 0.6 * updated_single_cam["clip-l4-relu-sim"]
-        # )
         if "clip-l4-relu-sim" not in updated_single_cam:
             updated_single_cam["final_cam"] = updated_single_cam["main-relu-cam"]
         else:
             updated_single_cam["final_cam"] = (
-                0.3 * updated_single_cam["clip-l3-relu-sim"]
-                + 0.3 * updated_single_cam["clip-l4-relu-sim"]
-                + 0.4 * updated_single_cam["main-relu-cam"]
+                0.3 * updated_single_cam["clip-l3-relu-sim"] # 0.3
+                + 0.3 * updated_single_cam["clip-l4-relu-sim"] # 0.3
+                + 0.4 * updated_single_cam["main-relu-cam"] # 0.4
             )
+        # cam_max = np.max(updated_single_cam["final_cam"], (1, 2), keepdims=True)
+        # cam_min = np.min(updated_single_cam["final_cam"], (1, 2), keepdims=True)
+        # updated_single_cam["final_cam"] = (
+        #     updated_single_cam["final_cam"] - cam_min
+        # ) / (cam_max - cam_min + 1e-5)
+
+        # save npy
+        # final_cams = updated_single_cam["final_cam"]
+        # cam_save_name = img_name.split(".")[0]
+        # np.save(f"best_cams/nyu/{cam_save_name}.npy", final_cams)
+        # save pseudo label
+        # final_cams = updated_single_cam["final_cam"]
+        # cam_save_name = img_name.split(".")[0]
+        # cam_save_name = path[batch_nb].replace("../","").replace("/","+").rsplit(".",1)[0]
+        # np.save(f"pseudo_labels/duke/{cam_save_name}.npy", final_cams)
+        # import pdb; pdb.set_trace()
 
         updated_cams_dicts.append(updated_single_cam)
 

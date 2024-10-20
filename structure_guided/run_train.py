@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-DEVICE_NR = "3"
+DEVICE_NR = "6"
 os.environ["CUDA_VISIBLE_DEVICES"] = DEVICE_NR
 
 from transformers import (
@@ -25,8 +25,6 @@ from dataset import DukeDataset, OCTDataset, RESCDatasetSeg
 
 # from network.unet_model import UNetWeakly, UNetWeaklyAtt
 from network.final_net import IntegratedMixformer
-from utils.utils_gradcam import CAMGeneratorAndSave
-
 
 from utils.utils import (
     OrgLabels,
@@ -114,6 +112,15 @@ class Train:
             total_cls_loss[k] += loss_collect[k].cpu().item()
             total_acc[k] += Counter(batch_accuracies_metrics)
         return gt_dicts, pred_dicts, total_cls_loss, total_acc
+    
+    def get_structural_inputs(self, layer_img, anomaly_diff):
+        if self.args.layer_branch and not self.args.add_abnormal:
+            return layer_img
+        if self.args.layer_branch and self.args.add_abnormal:
+            return normalized_batch_tensor(layer_img + anomaly_diff)
+        if self.args.add_abnormal:
+            return normalized_batch_tensor(anomaly_diff)
+        return layer_img
 
     def get_cls_loss(self, cls_pred_dicts, orig_gt, layer_gt):
         loss_collect = {k: 0 for k in cls_pred_dicts.keys()}
@@ -220,16 +227,8 @@ class Train:
                 data["caption_tensor"].to(self.device),
                 data["anomaly_diff"].to(self.device),
             )
-            if self.args.add_abnormal:
-                layer_img = normalized_batch_tensor(layer_img + anomaly_diff)
-            comb_input = torch.cat([image, layer_img, layer_uncertain], dim=1)
-            # _, ready_gradcam_pred = self.CamModel.get_cam_and_save(
-            #     {
-            #         "inputs": data,
-            #         "input_tensor": comb_input,
-            #     }
-            # )
-            # gradcam_img_list += ready_gradcam_pred
+            structural_img = self.get_structural_inputs(layer_img, anomaly_diff)
+            comb_input = torch.cat([image, structural_img, layer_uncertain], dim=1)
             with torch.no_grad():
                 (cls_pred_dicts, cams_dict, constraint_dict) = multi_task_model(
                     comb_input, caption_input=caption_tensor
@@ -269,11 +268,6 @@ class Train:
         print(f"Num of CAM images: {len(cam_img_list)}")
         gt_for_cam = [x["gt"] for x in cam_img_list]
         gt_for_layer_cam = [(x["gt"] > 0) * 1 for x in cam_img_list]
-
-        # score_gradcam = scores(
-        #     gt_for_cam, gradcam_img_list, n_class=self.full_num_class
-        # )
-        # print("GradCAM:\n", score_gradcam)
 
         all_keys = get_miou_for_multilevel_preds(
             cam_img_list,
@@ -343,9 +337,8 @@ class Train:
                 data["caption_tensor"].to(self.device),
                 data["anomaly_diff"].to(self.device),
             )
-            if self.args.add_abnormal:
-                layer_img = normalized_batch_tensor(layer_img + anomaly_diff)
-            comb_input = torch.cat([image, layer_img, layer_uncertain], dim=1)
+            structural_img = self.get_structural_inputs(layer_img, anomaly_diff)
+            comb_input = torch.cat([image, structural_img, layer_uncertain], dim=1)
             multi_optimizer.zero_grad()
             (cls_pred_dicts, cams_dict, constraint_dict) = multi_task_model(
                 comb_input, caption_input=caption_tensor
@@ -442,7 +435,7 @@ class Train:
 
     def get_models(self):
         multi_task_model = IntegratedMixformer(
-            layer_branch=self.args.layer_branch,
+            structural_branch=self.args.layer_branch or self.args.add_abnormal,
             clip_f=self.get_clip_feature(),
             img_size=self.args.is_size[0],
             cls_num_classes=self.num_class,
