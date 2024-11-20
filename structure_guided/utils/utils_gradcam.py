@@ -52,7 +52,9 @@ def get_mask_path_by_image_path(image_path):
 
 
 def load_mask(image_path):
-    orig_mask = np.asarray(Image.open(get_mask_path_by_image_path(image_path)))[..., 0]
+    orig_mask = np.asarray(Image.open(get_mask_path_by_image_path(image_path)))[
+        ..., 0
+    ].copy()
     orig_mask[orig_mask > 150] = 255
     orig_mask[orig_mask <= 150] = 0
     return orig_mask
@@ -233,7 +235,7 @@ class SegmentationModelOutputWrapper(torch.nn.Module):
         outputs = self.model(x)
         if self.branch == "x":
             return outputs[0]["main-cls"]
-        return outputs[1]["layer-cls"]
+        return outputs[0]["layer-cls"]
 
 
 class CAMGeneratorAndSave:
@@ -260,7 +262,7 @@ class CAMGeneratorAndSave:
         ]
         with GradCAM(
             model=self.modelx,
-            use_cuda="cuda",
+            # use_cuda=True,#"cuda",
             target_layers=target_layers_x,
             reshape_transform=reshape_segformer,
         ) as cam:
@@ -293,7 +295,6 @@ class CAMGeneratorAndSave:
 
         return resized_cam
 
-
     def get_cam_results_per_class(self, orig_img, orig_mask, norm_annot, batch_nb):
         save_cam_in_row = []
         rgb_img = (orig_img / 255).copy()
@@ -325,7 +326,10 @@ class CAMGeneratorAndSave:
         color_mask = np.zeros_like(rgb_img)
         for i_cls in range(1, get_num_classes() + 1):
             mask = pred_labels == i_cls
-            color_mask[:, :,][
+            color_mask[
+                :,
+                :,
+            ][
                 mask
             ] = type_color[i_cls]
         color_mask = cv2.cvtColor(color_mask.astype(np.uint8), cv2.COLOR_BGR2RGB)
@@ -379,7 +383,7 @@ class CAMGeneratorAndSave:
 
             if not self.save_results:
                 continue
-            
+
             ground_true_classes = [
                 i for i, v in enumerate(self.inputs["labels"][batch_nb]) if v > 0.5
             ]
