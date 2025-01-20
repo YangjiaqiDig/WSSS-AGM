@@ -6,8 +6,10 @@
 
 ## Fully-supervised
 semantic segmentation with pixel-level annotation on RESC dataset, for comparison
-## Structure-Guided (Ongoing)
+## Structure-Guided (Under Review)
+🎉 `11/2024` Paper is on arXiv preprint: 
 
+[A Multimodal Approach Combining Structural and Cross-domain Textual Guidance for Weakly Supervised OCT Segmentation](https://arxiv.org/abs/2411.12615)
 ## Download data
 1. The datasets, RESC and Duke, are used by all projects in this repo.
 
