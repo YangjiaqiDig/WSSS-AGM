@@ -149,11 +149,12 @@ def convert_our_dataset_labels(img):
 
 
 def convert_data_labels(img, root_dirs):
+    norm_img = img.copy()
     if "RESC" in root_dirs:
-        return convert_resc_labels(img)
-    if "BOE" in root_dirs:
-        return convert_duke_labels(img)
-    return convert_our_dataset_labels(img)
+        return convert_resc_labels(norm_img)
+    if "2015_BOE_Chiu" in root_dirs:
+        return convert_duke_labels(norm_img)
+    raise NotImplementedError("Dataset not implemented")
 
 
 def post_process_cam(resized_cam, orig_mask=None):
@@ -282,23 +283,9 @@ def restore_and_save(path, seg_out, labels, epoch, opts, save_results=False):
         orig_img = np.asarray(Image.open(image_path))
         if len(orig_img.shape) == 3:
             orig_img = orig_img[..., 0]
-
-        if "our_dataset" in opts.root_dirs:
-            if opts.expert_annot == "both":
-                annot_path = os.path.join(
-                    opts.root_dirs, opts.annot_dir, img_name.split(".")[0] + ".png"
-                )
-            else:
-                expert_annot_img_name = (
-                    img_name.split(".")[0] + f"_{opts.expert_annot}.png"
-                )
-                annot_path = os.path.join(
-                    opts.root_dirs, opts.annot_dir, expert_annot_img_name
-                )
-        else:
-            annot_path = os.path.join(
-                opts.root_dirs, opts.annot_dir, img_name
-            )  # resc valid/label_images
+        annot_path = os.path.join(
+            opts.root_dirs, opts.annot_dir, img_name
+        )  # resc valid/label_images
         orig_annot = np.asarray(Image.open(annot_path))
 
         truth_label = [OrgLabels[cls] for cls in ground_true_classes]
@@ -344,7 +331,6 @@ def restore_and_save(path, seg_out, labels, epoch, opts, save_results=False):
         cv2.imwrite(
             save_path + "/epoch{}_{}.jpg".format(epoch, truth_label), save_image_h
         )
-    # import pdb; pdb.set_trace()
     return gt, ready_pred_4d
 
 

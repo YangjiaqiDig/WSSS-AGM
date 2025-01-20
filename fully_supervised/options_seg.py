@@ -21,20 +21,14 @@ class Configs:
         self.parser.add_argument(
             "--root_dirs",
             type=str,
-            default="datasets/RESC",
-            help="root datasets directory: 2015_BOE_Chiu | RESC | our_dataset",
+            default="../datasets/RESC",
+            help="root datasets directory: RESC",
         )
         self.parser.add_argument(
             "--save_name",
             type=str,
-            default="seg_unet_layer_v2",
+            default="tpro_pl_segformer_b5_20241016",
             help="Path or url of the dataset",
-        )
-        self.parser.add_argument(
-            "--labels",
-            type=str,
-            default=["BackGround", "SRF", "IRF", "EZ disrupted", "HRD"],
-            help="['SRF', 'IRF', 'EZ', 'HRD',  'RPE', 'BackGround', 'EZ attenuated', 'EZ disrupted', 'Retinal Traction', 'Definite DRIL']",
         )
         self.parser.add_argument(
             "--resc_labels",
@@ -43,7 +37,7 @@ class Configs:
             help="['SRF', 'PED', 'LESION', 'BackGround']",
         )
         self.parser.add_argument(
-            "--boe_labels",
+            "--labels",
             type=str,
             default=["BackGround", "Fluid"],
             help="['Fluid', 'BackGround']",
@@ -51,33 +45,30 @@ class Configs:
         self.parser.add_argument(
             "--save_results",
             type=bool,
-            default=True,
+            default=False,
             help="Save the results in save folder or not",
-        )
-        self.parser.add_argument(
-            "--expert_annot", type=str, default="both", help="mina, meera, both"
         )
 
         """Model achitecture params"""
         self.parser.add_argument(
             "--retinal_model",
             type=str,
-            default="UNet",
+            default="Segformer",
             help="UNet | Segformer",
         )
 
         """Trainning params"""
         self.parser.add_argument(
-            "--loss_type", type=str, default="layer_ped", help="ce | layer | layer_ped"
+            "--loss_type", type=str, default="ce", help="ce | layer | layer_ped"
         )
         self.parser.add_argument(
             "--layer_scale", type=float, default=1, help="Layer loss scale factor"
         )
         self.parser.add_argument(
-            "--epochs", type=int, default=150, help="Number of training epochs"
+            "--epochs", type=int, default=50, help="Number of training epochs"
         )
         self.parser.add_argument(
-            "--train_batch_size", type=int, default=4, help="Batch size for training"
+            "--train_batch_size", type=int, default=8, help="Batch size for training"
         )
         self.parser.add_argument(
             "--valid_batch_size", type=int, default=1, help="Batch size for validation"
@@ -129,19 +120,9 @@ class Configs:
             args.annot_dir = "valid/label_images"
             args.mask_dir = "datasets/RESC/mask"
             args.save_folder = "outputs/resc/" + args.save_name
-        elif "BOE" in args.root_dirs:
+        elif "2015_BOE_Chiu" in args.root_dirs:
             args.annot_dir = "segment_annotation/labels"
             args.save_folder = "outputs/duke/" + args.save_name
-        else:
-            if args.expert_annot == "both":
-                args.annot_dir = "annot_combine"
-            else:
-                args.annot_dir = "annotation_v2"
-            args.mask_dir = "datasets/our_dataset/mask"
-            args.save_folder = (
-                "outputs/our_dataset/" + args.expert_annot + args.save_name
-            )
-
         if is_inference:
             print("Start inference args parsing")
             return args
@@ -165,8 +146,6 @@ class Configs:
     def get_labels(self):
         if "RESC" in self.parser.parse_args().root_dirs:
             return self.parser.parse_args().resc_labels
-        if "BOE" in self.parser.parse_args().root_dirs:
-            return self.parser.parse_args().boe_labels
         return self.parser.parse_args().labels
 
 
