@@ -155,7 +155,7 @@ def load_data(opt):
                       for x in splits}
         return dataloader
 
-    else:
+    elif opt.dataset in ['oct']:
         splits = ['train', 'test']
         drop_last_batch = {'train': True, 'test': False}
         shuffle = {'train': True, 'test': False}

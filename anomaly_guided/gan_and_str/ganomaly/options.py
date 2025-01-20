@@ -26,8 +26,8 @@ class Options():
 
         ##
         # Base
-        self.parser.add_argument('--dataset', default='oct', help='folder | cifar10 | mnist ')
-        self.parser.add_argument('--dataroot', default='../../oct_kaggle/', help='path to dataset')
+        self.parser.add_argument('--dataset', default='oct', help='folder | cifar10 | mnist | oct')
+        self.parser.add_argument('--dataroot', default='../../../datasets/oct_kaggle/', help='path to dataset')
         self.parser.add_argument('--batchsize', type=int, default=16, help='input batch size')
         self.parser.add_argument('--workers', type=int, help='number of data loading workers', default=8)
         self.parser.add_argument('--droplast', action='store_true', default=True, help='Drop last batch size.')
