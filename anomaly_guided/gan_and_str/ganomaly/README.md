@@ -48,3 +48,7 @@ The AGM's GANomaly pretrained was implemented based on the original GANomaly cod
     │   │   └── normal_tst_img_t.jpeg
 
     ```
+
+# Pretrained weights on OCT healthy images
+
+[Download Link](https://drive.google.com/drive/folders/18jiHlRjAxPREgKkSYVLcLSxZAN1Dgd3_)

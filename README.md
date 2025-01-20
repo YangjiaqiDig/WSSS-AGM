@@ -6,7 +6,7 @@
 
 ## Fully-supervised
 semantic segmentation with pixel-level annotation on RESC dataset, for comparison
-## Structure-Guided (Under Review)
+## Structural and Textual Guided (Under Review)
 🎉 `11/2024` Paper is on arXiv preprint: 
 
 [A Multimodal Approach Combining Structural and Cross-domain Textual Guidance for Weakly Supervised OCT Segmentation](https://arxiv.org/abs/2411.12615)
@@ -15,7 +15,7 @@ semantic segmentation with pixel-level annotation on RESC dataset, for compariso
 
 2. The datasets can be downloaded from this Google Drive [link](https://drive.google.com/drive/folders/1IdQUW4zpfnXRsq_8OWdEH90bWR8c9Cod?usp=sharing)
 
-3. The RESC and Duke are .tar.gz files which need to be extracted: ```tar -xzf datasets.tar.gz```. The structure of /your_dir/datasets/ should be organized as follows:
+3. The RESC and Duke are .tar.gz files which need to be extracted and put at the repo root path: ```tar -xzf datasets.tar.gz```. The structure of /your_dir/datasets/ should be organized as follows:
 ```
 ---2015_BOE_Chiu/
        --segment_annotation

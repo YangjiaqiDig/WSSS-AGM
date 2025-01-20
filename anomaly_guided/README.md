@@ -63,7 +63,11 @@ pip install grad-cam
        --resc_cls_labels.npy
 ```
 ## Weights Download
-TBD
+Same Google Drive as Datasets: [link](https://drive.google.com/drive/folders/1p0ruQ7V8YUuBfU87bizpT4WYtrFeckSK)
+
+AGM weights: resc & duke
+
+GANomaly pretrained weight: gan
 ## Training
 ```
 python run_train.py
