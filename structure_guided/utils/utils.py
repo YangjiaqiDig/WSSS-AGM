@@ -221,6 +221,11 @@ def get_gt_and_relevant_cams(cams_dict, input_data, opts):
             )
         if "clip-l4-relu-sim" not in updated_single_cam:
             updated_single_cam["final_cam"] = updated_single_cam["main-relu-cam"]
+        elif "clip-l3-relu-sim" not in updated_single_cam:
+            updated_single_cam["final_cam"] = (
+                0.5 * updated_single_cam["clip-l4-relu-sim"]
+                + 0.5 * updated_single_cam["main-relu-cam"]
+            )
         else:
             updated_single_cam["final_cam"] = (
                 0.3 * updated_single_cam["clip-l3-relu-sim"] # 0.3
@@ -236,7 +241,7 @@ def get_gt_and_relevant_cams(cams_dict, input_data, opts):
         # save npy
         # final_cams = updated_single_cam["final_cam"]
         # cam_save_name = img_name.split(".")[0]
-        # np.save(f"best_cams/nyu/{cam_save_name}.npy", final_cams)
+        # np.save(f"best_cams/resc_all_cams/{cam_save_name}.npy", updated_single_cam)
         # save pseudo label
         # final_cams = updated_single_cam["final_cam"]
         # cam_save_name = img_name.split(".")[0]
