@@ -413,6 +413,8 @@ class Train:
     def get_clip_feature(self):
         if not self.args.clip_branch:
             return None
+        if self.args.clip_version == "random":
+            return "random"
         if "our_dataset" in self.args.root_dirs:
             data_dir = "ours"
         elif "RESC" in self.args.root_dirs:
@@ -423,11 +425,14 @@ class Train:
             clip_f_path = f"text_features/{data_dir}/clip_label_base.pkl"
         elif self.args.clip_version == "large":
             clip_f_path = f"text_features/{data_dir}/clip_label_large.pkl"
+        elif self.args.clip_version == "medclip":
+            clip_f_path = f"text_features/{data_dir}/clip_label_medclip.pkl"
         else:
             raise NotImplementedError
 
         with open(clip_f_path, "rb") as f:
             clip_f = pickle.load(f).cpu()
+            print(f"Loaded clip feature from {clip_f_path}: {clip_f.shape}")
         if "BackGround" not in OrgLabels:
             # there is no background class
             clip_f = self.clip_f[1:]
@@ -437,6 +442,7 @@ class Train:
         multi_task_model = IntegratedMixformer(
             structural_branch=self.args.layer_branch or self.args.add_abnormal,
             clip_f=self.get_clip_feature(),
+            backbone="mit_b2",
             img_size=self.args.is_size[0],
             cls_num_classes=self.num_class,
             stride=[4, 2, 2, 2],  # default 4 2 2 2
@@ -448,7 +454,6 @@ class Train:
             constraint_loss=self.args.constraint_loss,
         )
         print(multi_task_model)
-        # self.CamModel = CAMGeneratorAndSave(self.args, multi_task_model)
         if self.args.load_model:
             reload_epoch = 40 if self.args.ckp_epoch == "last" else self.args.ckp_epoch
             print(

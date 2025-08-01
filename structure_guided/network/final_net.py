@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import pickle
 from timm.models.layers import trunc_normal_
 
+from network.pooling_strategies import AdaptiveKPool2d, TopKPool2d
+
 
 class AdaptiveLayerStage3(nn.Module):
     def __init__(self, in_dim, n_ratio, out_dim):
@@ -67,7 +69,7 @@ class AdaptiveLayerStage4(nn.Module):
 class IntegratedMixformer(nn.Module):
     def __init__(
         self,
-        layer_branch,
+        structural_branch,
         clip_f=None,
         backbone="mit_b2",
         cls_num_classes=3,
@@ -85,7 +87,7 @@ class IntegratedMixformer(nn.Module):
         self.cls_layer_classes = 2
         self.stride = stride
         self.img_size = img_size
-        self.layer_branch = layer_branch
+        self.structural_branch = structural_branch
         self.clip_f = clip_f
         self.caption_branch = caption_branch
 
@@ -102,7 +104,7 @@ class IntegratedMixformer(nn.Module):
             bias=False,
         )
 
-        if layer_branch:
+        if structural_branch:
             self.encoder_layer = getattr(org_mix_transformer, backbone)(
                 stride=self.stride, img_size=self.img_size
             )
@@ -117,8 +119,16 @@ class IntegratedMixformer(nn.Module):
             # self.head_layer = nn.Linear(self.in_channels[3], self.cls_layer_classes)
         if pool_type == "max":
             self.maxpool = nn.AdaptiveMaxPool2d(output_size=(1, 1))
-        else:
+        elif pool_type == "avg":
             self.maxpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
+        elif pool_type == "topk":
+            self.maxpool = TopKPool2d(k=5)
+        elif pool_type == "adaptive":
+            self.maxpool = AdaptiveKPool2d(
+                max_k=10, threshold=0.2
+            )
+        else:
+            raise ValueError(f"Unsupported pool_type: {pool_type}")
 
         if pretrained:
             self.load_pretained(backbone)
@@ -127,6 +137,8 @@ class IntegratedMixformer(nn.Module):
             self.freeze_front_layers(freeze_layers)
 
         if self.clip_f is not None:
+            if self.clip_f == "random":
+                self.clip_f = torch.randn(self.cls_num_classes, 512)
             num_channels = self.clip_f.shape[1]
             self.clip_fc3 = AdaptiveLayerStage4(
                 num_channels, 1 / 2, self.in_channels[2]
@@ -143,6 +155,8 @@ class IntegratedMixformer(nn.Module):
                 concate_channels = 768
             if "minilm" in caption_version:
                 concate_channels = 384
+            if "vision_embed" in caption_version:
+                concate_channels = 1024
             self.fuse_conv = nn.Conv2d(
                 in_channels=self.in_channels[3] + concate_channels,  # 768
                 out_channels=self.in_channels[3],
@@ -163,7 +177,7 @@ class IntegratedMixformer(nn.Module):
                 param.requires_grad = False
             # what about the norm1.weight and norm1.bias?
         is_freeze = True
-        if self.layer_branch:
+        if self.structural_branch:
             # start_layer="block2"
             for name, param in self.encoder_layer.named_parameters():
                 if not is_freeze:
@@ -237,7 +251,7 @@ class IntegratedMixformer(nn.Module):
             if k in self.encoder_org.state_dict().keys()
         }
         self.encoder_org.load_state_dict(state_dict, strict=False)
-        if self.layer_branch:
+        if self.structural_branch:
             self.encoder_layer.load_state_dict(state_dict, strict=False)
 
     def get_cam_target_layers(self, type):
@@ -387,6 +401,8 @@ class IntegratedMixformer(nn.Module):
             # caption_input: batch, 512
             caption_input = caption_input.to(org.device)
             org = self.fuse_caption_feature(org, caption_input)
+            # fuse on layer branch
+            # layer = self.fuse_caption_feature(layer, caption_input)
 
         # clip 4
         l_fea_4 = self.clip_fc4(clip_txt_f)  # num_cls, 512
@@ -412,7 +428,6 @@ class IntegratedMixformer(nn.Module):
         cls_layer_res = self.maxpool(layer)
         cls_layer_res = self.head_layer(cls_layer_res)
         cls_layer_res = cls_layer_res.view(cls_layer_res.size(0), -1)
-        # cls_layer_res = self.head_layer(cls_layer_res)
 
         cams_dict = {
             "main-relu-cam": F.relu(orig_cams[:, 1:]),
@@ -550,9 +565,9 @@ class IntegratedMixformer(nn.Module):
         return cls_pred_dicts, cams_dict, constraint_dict
 
     def forward(self, input_data, caption_input=None):
-        if self.layer_branch and self.clip_f is not None:
+        if self.structural_branch and self.clip_f is not None:
             return self.forward_dual_clip_branches(input_data, caption_input)
-        elif self.layer_branch:
+        elif self.structural_branch:
             return self.forward_dual_branches(input_data)
         elif self.clip_f is not None:
             return self.forward_clip_only_branches(input_data)
